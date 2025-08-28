@@ -573,33 +573,34 @@ class MainWindow(QWidget):
         self.le_title = QLineEdit()
         btn_resize = QPushButton("一鍵定位/調整大小")
         btn_resize.clicked.connect(self.on_resize_window)
+        
+        # 視窗尺寸調整控制項
+        self.le_win_x = QLineEdit()
+        self.le_win_y = QLineEdit()
+        self.le_win_width = QLineEdit()
+        self.le_win_height = QLineEdit()
+        
+        # 設定寬度限制
+        self.le_win_x.setMaximumWidth(80)
+        self.le_win_y.setMaximumWidth(80)
+        self.le_win_width.setMaximumWidth(80)
+        self.le_win_height.setMaximumWidth(80)
+        
         g1.addWidget(QLabel("視窗標題關鍵字："), 0, 0)
-        g1.addWidget(self.le_title, 0, 1)
-        g1.addWidget(btn_resize, 0, 2)
+        g1.addWidget(self.le_title, 0, 1, 1, 2)
+        g1.addWidget(btn_resize, 0, 3)
+        
+        g1.addWidget(QLabel("視窗位置 X："), 1, 0)
+        g1.addWidget(self.le_win_x, 1, 1)
+        g1.addWidget(QLabel("Y："), 1, 2)
+        g1.addWidget(self.le_win_y, 1, 3)
+        
+        g1.addWidget(QLabel("視窗尺寸 寬："), 2, 0)
+        g1.addWidget(self.le_win_width, 2, 1)
+        g1.addWidget(QLabel("高："), 2, 2)
+        g1.addWidget(self.le_win_height, 2, 3)
+        
         grp_win.setLayout(g1)
-
-        # --- 圖片路徑 ---
-        grp_img = QGroupBox("模板圖片")
-        g2 = QGridLayout()
-        self.le_target = QLineEdit()
-        self.le_char = QLineEdit()
-        self.le_arrow = QLineEdit()
-        b1 = QPushButton("選 target.png")
-        b2 = QPushButton("選 character.png")
-        b3 = QPushButton("選 arrow.png")
-        b1.clicked.connect(lambda: self.pick_file(self.le_target))
-        b2.clicked.connect(lambda: self.pick_file(self.le_char))
-        b3.clicked.connect(lambda: self.pick_file(self.le_arrow))
-        g2.addWidget(QLabel("目標圖標："), 0, 0)
-        g2.addWidget(self.le_target, 0, 1)
-        g2.addWidget(b1, 0, 2)
-        g2.addWidget(QLabel("人物模板："), 1, 0)
-        g2.addWidget(self.le_char, 1, 1)
-        g2.addWidget(b2, 1, 2)
-        g2.addWidget(QLabel("箭頭模板(可無)："), 2, 0)
-        g2.addWidget(self.le_arrow, 2, 1)
-        g2.addWidget(b3, 2, 2)
-        grp_img.setLayout(g2)
 
         # --- 區域設定 ---
         grp_region = QGroupBox("偵測區域")
@@ -645,7 +646,6 @@ class MainWindow(QWidget):
         self.log.setMinimumHeight(180)
 
         layout.addWidget(grp_win)
-        layout.addWidget(grp_img)
         layout.addWidget(grp_region)
         layout.addWidget(grp_ctrl)
         layout.addWidget(QLabel("Log"))
@@ -677,11 +677,14 @@ class MainWindow(QWidget):
 
     def _load_cfg_to_ui(self):
         self.le_title.setText(self.cfg["TARGET_TITLE_KEYWORD"])
-        self.le_target.setText(self.cfg["TARGET_IMAGE_PATH"])
-        self.le_char.setText(self.cfg["CHARACTER_IMAGE_PATH"])
-        self.le_arrow.setText(self.cfg["ARROW_IMAGE_PATH"])
         self.le_icon_region.setText(",".join(map(str, self.cfg["ICON_SEARCH_REGION"])))
         self.le_char_region.setText(",".join(map(str, self.cfg["CHARACTER_SEARCH_REGION"])))
+        
+        # 載入視窗位置和尺寸設定
+        self.le_win_x.setText(str(self.cfg["WINDOW_POSITION_X"]))
+        self.le_win_y.setText(str(self.cfg["WINDOW_POSITION_Y"]))
+        self.le_win_width.setText(str(self.cfg["WINDOW_WIDTH"]))
+        self.le_win_height.setText(str(self.cfg["WINDOW_HEIGHT"]))
 
     def _logical_to_device_rect(self, x, y, w, h):
         """把 Qt『邏輯像素』矩形轉成螢幕『實際像素』矩形（配合高 DPI）。"""
@@ -716,9 +719,15 @@ class MainWindow(QWidget):
 
     def _ui_to_cfg(self):
         self.cfg["TARGET_TITLE_KEYWORD"] = self.le_title.text().strip()
-        self.cfg["TARGET_IMAGE_PATH"] = self.le_target.text().strip()
-        self.cfg["CHARACTER_IMAGE_PATH"] = self.le_char.text().strip()
-        self.cfg["ARROW_IMAGE_PATH"] = self.le_arrow.text().strip()
+        
+        # 安全解析視窗位置和尺寸
+        try:
+            self.cfg["WINDOW_POSITION_X"] = int(self.le_win_x.text().strip() or "0")
+            self.cfg["WINDOW_POSITION_Y"] = int(self.le_win_y.text().strip() or "0")
+            self.cfg["WINDOW_WIDTH"] = int(self.le_win_width.text().strip() or "1280")
+            self.cfg["WINDOW_HEIGHT"] = int(self.le_win_height.text().strip() or "720")
+        except ValueError as e:
+            self.append_log(f"[警告] 視窗位置/尺寸格式錯誤: {e}")
         
         # 安全解析區域資訊
         try:
@@ -736,11 +745,6 @@ class MainWindow(QWidget):
             self.append_log(f"[警告] 人物區域格式錯誤: {e}")
 
     # ------- UI handlers -------
-    def pick_file(self, lineedit: QLineEdit):
-        path, _ = QFileDialog.getOpenFileName(self, "選擇圖片", "", "Images (*.png *.jpg *.jpeg *.bmp)")
-        if path:
-            lineedit.setText(path)
-
     def pick_region(self, lineedit: QLineEdit):
         # 若之前有尚未關閉的 overlay，先關閉
         if self._picker is not None:
