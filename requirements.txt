@@ -1,0 +1,33 @@
+# 圖標偵測與箭頭追蹤系統 - 所需套件
+# Image Detection and Arrow Tracking System - Required Packages
+
+# OpenCV - 圖像處理和電腦視覺
+opencv-python==4.8.1.*
+
+# PyAutoGUI - 自動化滑鼠和鍵盤操作
+pyautogui==0.9.54
+
+# NumPy - 數值計算和陣列處理
+numpy>=1.21.0,<2.0.0
+
+# PyGetWindow - 窗口管理
+pygetwindow==0.0.9
+
+# 相關依賴套件 (通常會自動安裝，但列出來確保相容性)
+# Pillow - 圖像處理 (PyAutoGUI 的依賴)
+Pillow>=8.0.0
+
+# PyScreeze - 螢幕截圖 (PyAutoGUI 的依賴)
+pyscreeze>=0.1.26
+
+# PyTweening - 動畫緩動 (PyAutoGUI 的依賴)
+pytweening>=1.0.3
+
+# PyMsgBox - 訊息框 (PyAutoGUI 的依賴)
+pymsgbox>=1.0.9
+
+# PyRect - 矩形工具 (PyAutoGUI 的依賴)
+pyrect>=0.2.0
+
+# PyPerClip - 剪貼簿操作 (PyAutoGUI 的依賴)
+pyperclip>=1.8.0

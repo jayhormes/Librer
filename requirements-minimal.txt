@@ -1,0 +1,7 @@
+# 圖標偵測與箭頭追蹤系統 - 最小依賴版本
+# 這個版本只包含主要套件，其他依賴會自動安裝
+
+opencv-python
+pyautogui
+numpy
+pygetwindow
