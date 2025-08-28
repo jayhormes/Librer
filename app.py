@@ -9,9 +9,9 @@ from PySide6.QtCore import Qt, QRect, QPoint, Signal, QObject, QThread
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton, QFileDialog,
     QGridLayout, QGroupBox, QTextEdit, QHBoxLayout, QVBoxLayout, QMessageBox,
-    QSizePolicy
+    QSizePolicy, QDialog, QSlider, QSpinBox, QDoubleSpinBox, QFormLayout, QTabWidget
 )
-from PySide6.QtGui import QPainter, QPen, QColor, QGuiApplication, QImage, QPixmap
+from PySide6.QtGui import QPainter, QPen, QColor, QGuiApplication, QImage, QPixmap, QIcon
 
 # ==========================
 # 設定檔處理
@@ -95,6 +95,305 @@ def clamp_region_to_screen(x, y, w, h):
     w = int(round(max(1, min(w, sw - x))))
     h = int(round(max(1, min(h, sh - y))))
     return x, y, w, h
+
+# ==========================
+# 配置設定對話框
+# ==========================
+class ConfigDialog(QDialog):
+    def __init__(self, cfg, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("參數設定")
+        self.setModal(True)
+        self.resize(500, 600)
+        
+        # 複製配置以避免直接修改原始配置
+        self.cfg = cfg.copy()
+        
+        self._build_ui()
+        self._load_values()
+        
+    def _build_ui(self):
+        layout = QVBoxLayout(self)
+        
+        # 使用標籤頁來組織不同類型的設定
+        tabs = QTabWidget()
+        
+        # 偵測參數標籤頁
+        detection_tab = QWidget()
+        detection_layout = QFormLayout(detection_tab)
+        
+        # 圖標偵測信心度
+        self.icon_confidence_slider = QSlider(Qt.Horizontal)
+        self.icon_confidence_slider.setRange(0, 100)
+        self.icon_confidence_slider.setValue(int(self.cfg["ICON_CONFIDENCE"] * 100))
+        self.icon_confidence_label = QLabel()
+        self.icon_confidence_slider.valueChanged.connect(self._update_icon_confidence_label)
+        
+        icon_conf_layout = QHBoxLayout()
+        icon_conf_layout.addWidget(self.icon_confidence_slider)
+        icon_conf_layout.addWidget(self.icon_confidence_label)
+        detection_layout.addRow("圖標偵測信心度:", icon_conf_layout)
+        
+        # 人物偵測信心度
+        self.character_confidence_slider = QSlider(Qt.Horizontal)
+        self.character_confidence_slider.setRange(0, 100)
+        self.character_confidence_slider.setValue(int(self.cfg["CHARACTER_CONFIDENCE"] * 100))
+        self.character_confidence_label = QLabel()
+        self.character_confidence_slider.valueChanged.connect(self._update_character_confidence_label)
+        
+        char_conf_layout = QHBoxLayout()
+        char_conf_layout.addWidget(self.character_confidence_slider)
+        char_conf_layout.addWidget(self.character_confidence_label)
+        detection_layout.addRow("人物偵測信心度:", char_conf_layout)
+        
+        # 圖標縮放步數
+        self.icon_scale_steps_spin = QSpinBox()
+        self.icon_scale_steps_spin.setRange(1, 20)
+        self.icon_scale_steps_spin.setValue(self.cfg["ICON_SCALE_STEPS"])
+        detection_layout.addRow("圖標縮放步數:", self.icon_scale_steps_spin)
+        
+        # 人物縮放步數
+        self.character_scale_steps_spin = QSpinBox()
+        self.character_scale_steps_spin.setRange(1, 20)
+        self.character_scale_steps_spin.setValue(self.cfg["CHARACTER_SCALE_STEPS"])
+        detection_layout.addRow("人物縮放步數:", self.character_scale_steps_spin)
+        
+        # 圖標縮放範圍
+        self.icon_scale_min_spin = QDoubleSpinBox()
+        self.icon_scale_min_spin.setRange(0.1, 2.0)
+        self.icon_scale_min_spin.setSingleStep(0.05)
+        self.icon_scale_min_spin.setDecimals(2)
+        self.icon_scale_min_spin.setValue(self.cfg["ICON_SCALE_RANGE"][0])
+        
+        self.icon_scale_max_spin = QDoubleSpinBox()
+        self.icon_scale_max_spin.setRange(0.1, 2.0)
+        self.icon_scale_max_spin.setSingleStep(0.05)
+        self.icon_scale_max_spin.setDecimals(2)
+        self.icon_scale_max_spin.setValue(self.cfg["ICON_SCALE_RANGE"][1])
+        
+        icon_scale_layout = QHBoxLayout()
+        icon_scale_layout.addWidget(QLabel("最小:"))
+        icon_scale_layout.addWidget(self.icon_scale_min_spin)
+        icon_scale_layout.addWidget(QLabel("最大:"))
+        icon_scale_layout.addWidget(self.icon_scale_max_spin)
+        detection_layout.addRow("圖標縮放範圍:", icon_scale_layout)
+        
+        # 人物縮放範圍
+        self.character_scale_min_spin = QDoubleSpinBox()
+        self.character_scale_min_spin.setRange(0.1, 2.0)
+        self.character_scale_min_spin.setSingleStep(0.05)
+        self.character_scale_min_spin.setDecimals(2)
+        self.character_scale_min_spin.setValue(self.cfg["CHARACTER_SCALE_RANGE"][0])
+        
+        self.character_scale_max_spin = QDoubleSpinBox()
+        self.character_scale_max_spin.setRange(0.1, 2.0)
+        self.character_scale_max_spin.setSingleStep(0.05)
+        self.character_scale_max_spin.setDecimals(2)
+        self.character_scale_max_spin.setValue(self.cfg["CHARACTER_SCALE_RANGE"][1])
+        
+        character_scale_layout = QHBoxLayout()
+        character_scale_layout.addWidget(QLabel("最小:"))
+        character_scale_layout.addWidget(self.character_scale_min_spin)
+        character_scale_layout.addWidget(QLabel("最大:"))
+        character_scale_layout.addWidget(self.character_scale_max_spin)
+        detection_layout.addRow("人物縮放範圍:", character_scale_layout)
+        
+        tabs.addTab(detection_tab, "偵測參數")
+        
+        # 箭頭偵測標籤頁
+        arrow_tab = QWidget()
+        arrow_layout = QFormLayout(arrow_tab)
+        
+        # 箭頭搜尋半徑
+        self.arrow_radius_slider = QSlider(Qt.Horizontal)
+        self.arrow_radius_slider.setRange(50, 300)
+        self.arrow_radius_slider.setValue(self.cfg["ARROW_SEARCH_RADIUS"])
+        self.arrow_radius_label = QLabel()
+        self.arrow_radius_slider.valueChanged.connect(self._update_arrow_radius_label)
+        
+        arrow_radius_layout = QHBoxLayout()
+        arrow_radius_layout.addWidget(self.arrow_radius_slider)
+        arrow_radius_layout.addWidget(self.arrow_radius_label)
+        arrow_layout.addRow("箭頭搜尋半徑:", arrow_radius_layout)
+        
+        # 箭頭最小面積
+        self.arrow_min_area_slider = QSlider(Qt.Horizontal)
+        self.arrow_min_area_slider.setRange(10, 500)
+        self.arrow_min_area_slider.setValue(self.cfg["ARROW_MIN_AREA"])
+        self.arrow_min_area_label = QLabel()
+        self.arrow_min_area_slider.valueChanged.connect(self._update_arrow_min_area_label)
+        
+        arrow_area_layout = QHBoxLayout()
+        arrow_area_layout.addWidget(self.arrow_min_area_slider)
+        arrow_area_layout.addWidget(self.arrow_min_area_label)
+        arrow_layout.addRow("箭頭最小面積:", arrow_area_layout)
+        
+        # 箭頭偵測超時時間
+        self.arrow_timeout_spin = QDoubleSpinBox()
+        self.arrow_timeout_spin.setRange(0.5, 10.0)
+        self.arrow_timeout_spin.setSingleStep(0.1)
+        self.arrow_timeout_spin.setValue(self.cfg["ARROW_DETECTION_TIMEOUT"])
+        arrow_layout.addRow("箭頭偵測超時時間(秒):", self.arrow_timeout_spin)
+        
+        # 箭頭最小命中次數
+        self.arrow_min_hits_spin = QSpinBox()
+        self.arrow_min_hits_spin.setRange(1, 20)
+        self.arrow_min_hits_spin.setValue(self.cfg["ARROW_MIN_HITS"])
+        arrow_layout.addRow("箭頭最小命中次數:", self.arrow_min_hits_spin)
+        
+        tabs.addTab(arrow_tab, "箭頭偵測")
+        
+        # 移動控制標籤頁
+        movement_tab = QWidget()
+        movement_layout = QFormLayout(movement_tab)
+        
+        # 拖曳距離
+        self.drag_distance_slider = QSlider(Qt.Horizontal)
+        self.drag_distance_slider.setRange(50, 500)
+        self.drag_distance_slider.setValue(self.cfg["DRAG_DISTANCE"])
+        self.drag_distance_label = QLabel()
+        self.drag_distance_slider.valueChanged.connect(self._update_drag_distance_label)
+        
+        drag_dist_layout = QHBoxLayout()
+        drag_dist_layout.addWidget(self.drag_distance_slider)
+        drag_dist_layout.addWidget(self.drag_distance_label)
+        movement_layout.addRow("拖曳距離(像素):", drag_dist_layout)
+        
+        # 拖曳持續時間
+        self.drag_hold_spin = QDoubleSpinBox()
+        self.drag_hold_spin.setRange(0.1, 5.0)
+        self.drag_hold_spin.setSingleStep(0.1)
+        self.drag_hold_spin.setValue(self.cfg["DRAG_HOLD_SECONDS"])
+        movement_layout.addRow("拖曳持續時間(秒):", self.drag_hold_spin)
+        
+        tabs.addTab(movement_tab, "移動控制")
+        
+        # 時間控制標籤頁
+        timing_tab = QWidget()
+        timing_layout = QFormLayout(timing_tab)
+        
+        # 主搜尋間隔
+        self.main_interval_spin = QDoubleSpinBox()
+        self.main_interval_spin.setRange(0.1, 5.0)
+        self.main_interval_spin.setSingleStep(0.1)
+        self.main_interval_spin.setValue(self.cfg["MAIN_SEARCH_INTERVAL"])
+        timing_layout.addRow("主搜尋間隔(秒):", self.main_interval_spin)
+        
+        # 箭頭偵測間隔
+        self.arrow_interval_spin = QDoubleSpinBox()
+        self.arrow_interval_spin.setRange(0.05, 2.0)
+        self.arrow_interval_spin.setSingleStep(0.05)
+        self.arrow_interval_spin.setValue(self.cfg["ARROW_SEARCH_INTERVAL"])
+        timing_layout.addRow("箭頭偵測間隔(秒):", self.arrow_interval_spin)
+        
+        # 最大箭頭嘗試次數
+        self.max_attempts_spin = QSpinBox()
+        self.max_attempts_spin.setRange(1, 20)
+        self.max_attempts_spin.setValue(self.cfg["MAX_ARROW_ATTEMPTS"])
+        timing_layout.addRow("最大箭頭嘗試次數:", self.max_attempts_spin)
+        
+        tabs.addTab(timing_tab, "時間控制")
+        
+        layout.addWidget(tabs)
+        
+        # 按鈕
+        button_layout = QHBoxLayout()
+        self.ok_button = QPushButton("確定")
+        self.cancel_button = QPushButton("取消")
+        self.reset_button = QPushButton("重設為預設值")
+        
+        self.ok_button.clicked.connect(self.accept)
+        self.cancel_button.clicked.connect(self.reject)
+        self.reset_button.clicked.connect(self._reset_to_defaults)
+        
+        button_layout.addWidget(self.reset_button)
+        button_layout.addStretch()
+        button_layout.addWidget(self.ok_button)
+        button_layout.addWidget(self.cancel_button)
+        
+        layout.addLayout(button_layout)
+        
+    def _load_values(self):
+        """載入初始值並更新標籤"""
+        self._update_icon_confidence_label()
+        self._update_character_confidence_label()
+        self._update_arrow_radius_label()
+        self._update_arrow_min_area_label()
+        self._update_drag_distance_label()
+        
+    def _update_icon_confidence_label(self):
+        value = self.icon_confidence_slider.value() / 100.0
+        self.icon_confidence_label.setText(f"{value:.2f}")
+        
+    def _update_character_confidence_label(self):
+        value = self.character_confidence_slider.value() / 100.0
+        self.character_confidence_label.setText(f"{value:.2f}")
+        
+    def _update_arrow_radius_label(self):
+        value = self.arrow_radius_slider.value()
+        self.arrow_radius_label.setText(f"{value} px")
+        
+    def _update_arrow_min_area_label(self):
+        value = self.arrow_min_area_slider.value()
+        self.arrow_min_area_label.setText(f"{value} px²")
+        
+    def _update_drag_distance_label(self):
+        value = self.drag_distance_slider.value()
+        self.drag_distance_label.setText(f"{value} px")
+        
+    def _reset_to_defaults(self):
+        """重設所有值為預設值"""
+        # 偵測參數
+        self.icon_confidence_slider.setValue(int(DEFAULT_CFG["ICON_CONFIDENCE"] * 100))
+        self.character_confidence_slider.setValue(int(DEFAULT_CFG["CHARACTER_CONFIDENCE"] * 100))
+        self.icon_scale_steps_spin.setValue(DEFAULT_CFG["ICON_SCALE_STEPS"])
+        self.character_scale_steps_spin.setValue(DEFAULT_CFG["CHARACTER_SCALE_STEPS"])
+        
+        # 縮放範圍
+        self.icon_scale_min_spin.setValue(DEFAULT_CFG["ICON_SCALE_RANGE"][0])
+        self.icon_scale_max_spin.setValue(DEFAULT_CFG["ICON_SCALE_RANGE"][1])
+        self.character_scale_min_spin.setValue(DEFAULT_CFG["CHARACTER_SCALE_RANGE"][0])
+        self.character_scale_max_spin.setValue(DEFAULT_CFG["CHARACTER_SCALE_RANGE"][1])
+        
+        # 箭頭偵測
+        self.arrow_radius_slider.setValue(DEFAULT_CFG["ARROW_SEARCH_RADIUS"])
+        self.arrow_min_area_slider.setValue(DEFAULT_CFG["ARROW_MIN_AREA"])
+        self.arrow_timeout_spin.setValue(DEFAULT_CFG["ARROW_DETECTION_TIMEOUT"])
+        self.arrow_min_hits_spin.setValue(DEFAULT_CFG["ARROW_MIN_HITS"])
+        
+        # 移動控制
+        self.drag_distance_slider.setValue(DEFAULT_CFG["DRAG_DISTANCE"])
+        self.drag_hold_spin.setValue(DEFAULT_CFG["DRAG_HOLD_SECONDS"])
+        
+        # 時間控制
+        self.main_interval_spin.setValue(DEFAULT_CFG["MAIN_SEARCH_INTERVAL"])
+        self.arrow_interval_spin.setValue(DEFAULT_CFG["ARROW_SEARCH_INTERVAL"])
+        self.max_attempts_spin.setValue(DEFAULT_CFG["MAX_ARROW_ATTEMPTS"])
+        
+    def get_config(self):
+        """返回更新後的配置"""
+        self.cfg["ICON_CONFIDENCE"] = self.icon_confidence_slider.value() / 100.0
+        self.cfg["CHARACTER_CONFIDENCE"] = self.character_confidence_slider.value() / 100.0
+        self.cfg["ICON_SCALE_STEPS"] = self.icon_scale_steps_spin.value()
+        self.cfg["CHARACTER_SCALE_STEPS"] = self.character_scale_steps_spin.value()
+        
+        # 縮放範圍
+        self.cfg["ICON_SCALE_RANGE"] = [self.icon_scale_min_spin.value(), self.icon_scale_max_spin.value()]
+        self.cfg["CHARACTER_SCALE_RANGE"] = [self.character_scale_min_spin.value(), self.character_scale_max_spin.value()]
+        
+        self.cfg["ARROW_SEARCH_RADIUS"] = self.arrow_radius_slider.value()
+        self.cfg["ARROW_MIN_AREA"] = self.arrow_min_area_slider.value()
+        self.cfg["ARROW_DETECTION_TIMEOUT"] = self.arrow_timeout_spin.value()
+        self.cfg["ARROW_MIN_HITS"] = self.arrow_min_hits_spin.value()
+        
+        self.cfg["DRAG_DISTANCE"] = self.drag_distance_slider.value()
+        self.cfg["DRAG_HOLD_SECONDS"] = self.drag_hold_spin.value()
+        
+        self.cfg["MAIN_SEARCH_INTERVAL"] = self.main_interval_spin.value()
+        self.cfg["ARROW_SEARCH_INTERVAL"] = self.arrow_interval_spin.value()
+        self.cfg["MAX_ARROW_ATTEMPTS"] = self.max_attempts_spin.value()
+        
+        return self.cfg
 
 # ==========================
 # 你的偵測類別（略微改為讀 cfg 變數）
@@ -564,6 +863,14 @@ class MainWindow(QWidget):
         self._build_ui()
         self._load_cfg_to_ui()
 
+    def _create_vertical_line(self):
+        """創建垂直分隔線"""
+        line = QLabel()
+        line.setText("|")
+        line.setStyleSheet("color: #ccc; font-size: 18px; margin: 0 5px;")
+        line.setAlignment(Qt.AlignCenter)
+        return line
+
     def _build_ui(self):
         layout = QVBoxLayout(self)
 
@@ -625,7 +932,9 @@ class MainWindow(QWidget):
 
         # --- 控制 ---
         grp_ctrl = QGroupBox("控制")
-        h = QHBoxLayout()
+        
+        # 控制按鈕佈局
+        control_layout = QHBoxLayout()
         self.btn_start = QPushButton("Start")
         self.btn_pause = QPushButton("Pause")
         self.btn_resume = QPushButton("Resume")
@@ -634,11 +943,51 @@ class MainWindow(QWidget):
         self.btn_pause.clicked.connect(self.on_pause)
         self.btn_resume.clicked.connect(self.on_resume)
         self.btn_stop.clicked.connect(self.on_stop)
-        h.addWidget(self.btn_start)
-        h.addWidget(self.btn_pause)
-        h.addWidget(self.btn_resume)
-        h.addWidget(self.btn_stop)
-        grp_ctrl.setLayout(h)
+        
+        control_layout.addWidget(self.btn_start)
+        control_layout.addWidget(self.btn_pause)
+        control_layout.addWidget(self.btn_resume)
+        control_layout.addWidget(self.btn_stop)
+        
+        # 添加分隔線和設定按鈕
+        control_layout.addWidget(self._create_vertical_line())
+        
+        # 齒輪設定按鈕
+        self.btn_settings = QPushButton()
+        
+        # 嘗試載入齒輪圖標，如果失敗則使用文字
+        try:
+            if os.path.exists("gear_icon_24.png"):
+                self.btn_settings.setIcon(QIcon("gear_icon_24.png"))
+                self.btn_settings.setText("")
+            else:
+                self.btn_settings.setText("⚙")  # 備用齒輪圖標
+        except:
+            self.btn_settings.setText("設定")  # 最終備用方案
+            
+        self.btn_settings.setToolTip("參數設定")
+        self.btn_settings.setFixedSize(32, 32)  # 稍微增大一點
+        self.btn_settings.setStyleSheet("""
+            QPushButton {
+                font-size: 16px;
+                border: 1px solid #ccc;
+                border-radius: 6px;
+                background-color: #f8f8f8;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #e8e8e8;
+                border-color: #999;
+            }
+            QPushButton:pressed {
+                background-color: #d8d8d8;
+                border-color: #666;
+            }
+        """)
+        self.btn_settings.clicked.connect(self.on_settings)
+        control_layout.addWidget(self.btn_settings)
+        
+        grp_ctrl.setLayout(control_layout)
         
         self.update_button_status("stopped")
 
@@ -832,6 +1181,7 @@ class MainWindow(QWidget):
             self.append_log(f"[調整視窗失敗] {e}")
 
     def update_button_status(self, status):
+        """
         status: "running", "paused", "stopped"
         """
         default_style = ""
@@ -878,6 +1228,22 @@ class MainWindow(QWidget):
             self.worker.wait(2000)
             self.append_log("[停止]")
             self.update_button_status("stopped")
+
+    def on_settings(self):
+        """打開參數設定對話框"""
+        try:
+            dialog = ConfigDialog(self.cfg, self)
+            if dialog.exec() == QDialog.Accepted:
+                # 獲取更新後的配置
+                self.cfg = dialog.get_config()
+                # 保存配置到文件
+                save_cfg(self.cfg)
+                self.append_log("[設定] 參數設定已更新並儲存")
+            else:
+                self.append_log("[設定] 取消參數設定")
+        except Exception as e:
+            self.append_log(f"[設定錯誤] {e}")
+            QMessageBox.warning(self, "錯誤", f"打開設定對話框時發生錯誤：{e}")
 
     def _on_region_picked(self, lineedit: QLineEdit, region_logical: tuple):
         # region_logical 是 Qt 的『邏輯像素』(x,y,w,h)
