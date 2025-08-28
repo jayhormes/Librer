@@ -3,6 +3,7 @@ import pyautogui
 import numpy as np
 import time
 import math
+import random
 import pygetwindow as gw
 from config import *
 
@@ -164,11 +165,24 @@ class ImageDetector:
         return None, None
     
     def click_center(self, location, scale):
-        """點擊圖片中心"""
+        """點擊圖片中心（加入隨機偏移）"""
         center_x, center_y = self.get_center_position(location, scale)
         if center_x and center_y:
-            print(f"點擊圖片中心點：({center_x:.0f}, {center_y:.0f})")
-            pyautogui.click(center_x, center_y)
+            # 在中心點附近20像素範圍內隨機偏移
+            random_offset_x = random.randint(-20, 20)
+            random_offset_y = random.randint(-20, 20)
+            
+            # 計算最終點擊位置
+            click_x = center_x + random_offset_x
+            click_y = center_y + random_offset_y
+            
+            # 確保點擊位置在螢幕範圍內
+            screen_width, screen_height = pyautogui.size()
+            click_x = max(0, min(screen_width - 1, click_x))
+            click_y = max(0, min(screen_height - 1, click_y))
+            
+            print(f"點擊圖片中心點：({center_x:.0f}, {center_y:.0f})，隨機偏移：({random_offset_x}, {random_offset_y})，最終位置：({click_x:.0f}, {click_y:.0f})")
+            pyautogui.click(click_x, click_y)
             return True
         return False
 
