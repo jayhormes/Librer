@@ -551,7 +551,7 @@ class RegionPicker(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("圖標偵測與箭頭追蹤 - GUI")
+        self.setWindowTitle("Librer - [V.1.0.0, 2025/08/25]")
         self.cfg = load_cfg()
         self.worker = None
         self._picker = None 
