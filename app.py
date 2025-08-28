@@ -103,6 +103,13 @@ class ConfigDialog(QDialog):
     def __init__(self, cfg, parent=None):
         super().__init__(parent)
         self.setWindowTitle("參數設定")
+        
+        # 設置窗口圖標
+        if os.path.exists("zeny.ico"):
+            self.setWindowIcon(QIcon("zeny.ico"))
+        elif os.path.exists("zeny.png"):
+            self.setWindowIcon(QIcon("zeny.png"))
+        
         self.setModal(True)
         self.resize(500, 600)
         
@@ -739,6 +746,12 @@ class RegionPicker(QWidget):
         super().__init__()
         self.setWindowTitle("選擇區域")
         
+        # 設置窗口圖標
+        if os.path.exists("zeny.ico"):
+            self.setWindowIcon(QIcon("zeny.ico"))
+        elif os.path.exists("zeny.png"):
+            self.setWindowIcon(QIcon("zeny.png"))
+        
         # 設定視窗屬性 - 更強制的置頂和全螢幕
         self.setWindowFlags(
             Qt.FramelessWindowHint |
@@ -851,6 +864,13 @@ class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Librer - [V.1.0.0, 2025/08/25]")
+        
+        # 設置窗口圖標
+        if os.path.exists("zeny.ico"):
+            self.setWindowIcon(QIcon("zeny.ico"))
+        elif os.path.exists("zeny.png"):
+            self.setWindowIcon(QIcon("zeny.png"))
+        
         self.cfg = load_cfg()
         self.worker = None
         self._picker = None 
