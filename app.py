@@ -639,6 +639,8 @@ class MainWindow(QWidget):
         h.addWidget(self.btn_resume)
         h.addWidget(self.btn_stop)
         grp_ctrl.setLayout(h)
+        
+        self.update_button_status("stopped")
 
         # --- Log ---
         self.log = QTextEdit()
@@ -829,6 +831,22 @@ class MainWindow(QWidget):
         except Exception as e:
             self.append_log(f"[調整視窗失敗] {e}")
 
+    def update_button_status(self, status):
+        status: "running", "paused", "stopped"
+        """
+        default_style = ""
+        self.btn_start.setStyleSheet(default_style)
+        self.btn_pause.setStyleSheet(default_style)
+        self.btn_resume.setStyleSheet(default_style)
+        self.btn_stop.setStyleSheet(default_style)
+        
+        if status == "running":
+            self.btn_start.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
+        elif status == "paused":
+            self.btn_pause.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold;")
+        elif status == "stopped":
+            self.btn_stop.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
+
     def on_start(self):
         self._ui_to_cfg(); save_cfg(self.cfg)
         if self.worker and self.worker.isRunning():
@@ -837,24 +855,29 @@ class MainWindow(QWidget):
         self.worker = DetectorWorker(self.cfg)
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.finished.connect(lambda: self.append_log("[Worker 結束]"))
+        self.worker.signals.finished.connect(lambda: self.update_button_status("stopped"))
         self.worker.start()
         self.append_log("[Worker 啟動]")
+        self.update_button_status("running")
 
     def on_pause(self):
         if self.worker and self.worker.isRunning():
             self.worker.pause()
             self.append_log("[暫停]")
+            self.update_button_status("paused")
 
     def on_resume(self):
         if self.worker and self.worker.isRunning():
             self.worker.resume()
             self.append_log("[恢復]")
+            self.update_button_status("running")
 
     def on_stop(self):
         if self.worker and self.worker.isRunning():
             self.worker.stop()
             self.worker.wait(2000)
             self.append_log("[停止]")
+            self.update_button_status("stopped")
 
     def _on_region_picked(self, lineedit: QLineEdit, region_logical: tuple):
         # region_logical 是 Qt 的『邏輯像素』(x,y,w,h)
