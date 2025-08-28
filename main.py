@@ -168,10 +168,10 @@ class ImageDetector:
         """點擊圖片中心（加入隨機偏移）"""
         center_x, center_y = self.get_center_position(location, scale)
         if center_x and center_y:
-            # 在中心點附近20像素範圍內隨機偏移
-            random_offset_x = random.randint(-20, 20)
-            random_offset_y = random.randint(-20, 20)
-            
+            # 在中心點附近10像素範圍內隨機偏移
+            random_offset_x = random.randint(-10, 10)
+            random_offset_y = random.randint(-10, 10)
+
             # 計算最終點擊位置
             click_x = center_x + random_offset_x
             click_y = center_y + random_offset_y
