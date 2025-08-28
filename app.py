@@ -14,6 +14,20 @@ from PySide6.QtWidgets import (
 from PySide6.QtGui import QPainter, QPen, QColor, QGuiApplication, QImage, QPixmap, QIcon
 
 # ==========================
+# 資源文件路徑處理
+# ==========================
+def resource_path(relative_path):
+    """獲取資源文件的絕對路徑，處理打包後的路徑"""
+    try:
+        # PyInstaller 打包後的臨時文件夾
+        base_path = sys._MEIPASS
+    except Exception:
+        # 開發環境下的路徑
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
+
+# ==========================
 # 設定檔處理
 # ==========================
 DEFAULT_CFG = {
@@ -23,9 +37,9 @@ DEFAULT_CFG = {
     "WINDOW_WIDTH": 1280,
     "WINDOW_HEIGHT": 720,
 
-    "TARGET_IMAGE_PATH": "target.png",
-    "CHARACTER_IMAGE_PATH": "character.png",
-    "ARROW_IMAGE_PATH": "arrow.png",  # 只是給你保留選檔，實際偵測走顏色
+    "TARGET_IMAGE_PATH": "images/target.png",
+    "CHARACTER_IMAGE_PATH": "images/character.png",
+    "ARROW_IMAGE_PATH": "images/arrow.png",  # 只是給你保留選檔，實際偵測走顏色
 
     # 區塊 (x, y, w, h)
     "ICON_SEARCH_REGION": [0, 0, 800, 600],
@@ -105,10 +119,12 @@ class ConfigDialog(QDialog):
         self.setWindowTitle("參數設定")
         
         # 設置窗口圖標
-        if os.path.exists("zeny.ico"):
-            self.setWindowIcon(QIcon("zeny.ico"))
-        elif os.path.exists("zeny.png"):
-            self.setWindowIcon(QIcon("zeny.png"))
+        zeny_ico_path = resource_path("zeny.ico")
+        zeny_png_path = resource_path("zeny.png")
+        if os.path.exists(zeny_ico_path):
+            self.setWindowIcon(QIcon(zeny_ico_path))
+        elif os.path.exists(zeny_png_path):
+            self.setWindowIcon(QIcon(zeny_png_path))
         
         self.setModal(True)
         self.resize(500, 600)
@@ -747,10 +763,12 @@ class RegionPicker(QWidget):
         self.setWindowTitle("選擇區域")
         
         # 設置窗口圖標
-        if os.path.exists("zeny.ico"):
-            self.setWindowIcon(QIcon("zeny.ico"))
-        elif os.path.exists("zeny.png"):
-            self.setWindowIcon(QIcon("zeny.png"))
+        zeny_ico_path = resource_path("zeny.ico")
+        zeny_png_path = resource_path("zeny.png")
+        if os.path.exists(zeny_ico_path):
+            self.setWindowIcon(QIcon(zeny_ico_path))
+        elif os.path.exists(zeny_png_path):
+            self.setWindowIcon(QIcon(zeny_png_path))
         
         # 設定視窗屬性 - 更強制的置頂和全螢幕
         self.setWindowFlags(
@@ -866,10 +884,12 @@ class MainWindow(QWidget):
         self.setWindowTitle("Librer - [V.1.0.0, 2025/08/25]")
         
         # 設置窗口圖標
-        if os.path.exists("zeny.ico"):
-            self.setWindowIcon(QIcon("zeny.ico"))
-        elif os.path.exists("zeny.png"):
-            self.setWindowIcon(QIcon("zeny.png"))
+        zeny_ico_path = resource_path("zeny.ico")
+        zeny_png_path = resource_path("zeny.png")
+        if os.path.exists(zeny_ico_path):
+            self.setWindowIcon(QIcon(zeny_ico_path))
+        elif os.path.exists(zeny_png_path):
+            self.setWindowIcon(QIcon(zeny_png_path))
         
         self.cfg = load_cfg()
         self.worker = None
@@ -975,10 +995,12 @@ class MainWindow(QWidget):
         # 齒輪設定按鈕
         self.btn_settings = QPushButton()
         
-        # 嘗試載入齒輪圖標，如果失敗則使用文字
+        # 嘗試載入內嵌的齒輪圖標
         try:
-            if os.path.exists("gear_icon_24.png"):
-                self.btn_settings.setIcon(QIcon("gear_icon_24.png"))
+            # 優先嘗試從內部資源載入
+            gear_icon_path = resource_path("gear_icon_24.png")
+            if os.path.exists(gear_icon_path):
+                self.btn_settings.setIcon(QIcon(gear_icon_path))
                 self.btn_settings.setText("")
             else:
                 self.btn_settings.setText("⚙")  # 備用齒輪圖標
