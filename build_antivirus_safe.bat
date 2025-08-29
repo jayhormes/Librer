@@ -40,11 +40,17 @@ if %ERRORLEVEL% NEQ 0 (
 )
 
 echo.
+echo 正在複製配置文件和資源...
+copy "config.json" "dist\" >nul 2>&1
+echo ✅ 已複製 config.json
+
+echo.
 echo 正在創建 images 資料夾...
 if not exist "dist\images" mkdir "dist\images"
 copy "images\target.png" "dist\images\" >nul 2>&1
 copy "images\character.png" "dist\images\" >nul 2>&1
 copy "images\arrow.png" "dist\images\" >nul 2>&1
+echo ✅ 已複製圖片資源
 
 echo.
 echo ================================================

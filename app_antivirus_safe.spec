@@ -3,12 +3,11 @@
 # 減少防毒誤報的配置
 block_cipher = None
 
-# 只內嵌必要的資源
+# 只內嵌必要的資源（圖標和版本信息）
 internal_files = [
     ('gear_icon_24.png', '.'),
     ('gear_icon_32.png', '.'),
     ('zeny.ico', '.'),
-    ('zeny.png', '.'),
 ]
 
 a = Analysis(

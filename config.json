@@ -24,10 +24,10 @@
     142,
     168
   ],
-  "ICON_CONFIDENCE": 0.85,
+  "ICON_CONFIDENCE": 0.5,
   "ICON_SCALE_RANGE": [
-    0.95,
-    1.05
+    0.8,
+    1.2
   ],
   "ICON_SCALE_STEPS": 10,
   "ARROW_IMAGE_PATH": "images/arrow.png",

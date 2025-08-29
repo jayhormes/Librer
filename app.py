@@ -27,6 +27,25 @@ def resource_path(relative_path):
     
     return os.path.join(base_path, relative_path)
 
+def config_file_path(relative_path):
+    """獲取配置和資源文件路徑，優先使用執行檔目錄"""
+    # 執行檔所在目錄
+    if getattr(sys, 'frozen', False):
+        # 打包後的執行檔目錄
+        exe_dir = os.path.dirname(sys.executable)
+    else:
+        # 開發環境
+        exe_dir = os.path.abspath(".")
+    
+    exe_path = os.path.join(exe_dir, relative_path)
+    
+    # 如果執行檔目錄有這個檔案，就用執行檔目錄的
+    if os.path.exists(exe_path):
+        return exe_path
+    
+    # 否則回退到內嵌資源路徑
+    return resource_path(relative_path)
+
 # ==========================
 # 設定檔處理
 # ==========================
@@ -106,11 +125,12 @@ DEFAULT_CFG = {
     "ARROW_SEARCH_INTERVAL": 0.2
 }
 
-CFG_PATH = "config.json"
+CFG_PATH = config_file_path("config.json")
 
 def load_cfg():
-    if os.path.exists(CFG_PATH):
-        with open(CFG_PATH, "r", encoding="utf-8") as f:
+    cfg_path = config_file_path("config.json")
+    if os.path.exists(cfg_path):
+        with open(cfg_path, "r", encoding="utf-8") as f:
             data = json.load(f)
         # 舊檔案補缺欄
         for k,v in DEFAULT_CFG.items():
@@ -120,7 +140,8 @@ def load_cfg():
     return DEFAULT_CFG.copy()
 
 def save_cfg(cfg):
-    with open(CFG_PATH, "w", encoding="utf-8") as f:
+    cfg_path = config_file_path("config.json")
+    with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 # ==========================
@@ -1527,14 +1548,14 @@ class DetectorWorker(QThread):
     def run(self):
         try:
             icon = ImageDetector(
-                template_path=resource_path(self.cfg["TARGET_IMAGE_PATH"]),
+                template_path=config_file_path(self.cfg["TARGET_IMAGE_PATH"]),
                 search_region=self.cfg["ICON_SEARCH_REGION"],
                 confidence=self.cfg["ICON_CONFIDENCE"],
                 scale_steps=self.cfg["ICON_SCALE_STEPS"],
                 scale_range=tuple(self.cfg["ICON_SCALE_RANGE"])
             )
             arrow = ArrowDetector(
-                character_template_path=resource_path(self.cfg["CHARACTER_IMAGE_PATH"]),
+                character_template_path=config_file_path(self.cfg["CHARACTER_IMAGE_PATH"]),
                 search_region=self.cfg["CHARACTER_SEARCH_REGION"],
                 arrow_search_radius=self.cfg["ARROW_SEARCH_RADIUS"],
                 min_area=self.cfg["ARROW_MIN_AREA"],
