@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QRect, QPoint, Signal, QObject, QThread
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton, QFileDialog,
     QGridLayout, QGroupBox, QTextEdit, QHBoxLayout, QVBoxLayout, QMessageBox,
-    QSizePolicy, QDialog, QSlider, QSpinBox, QDoubleSpinBox, QFormLayout, QTabWidget
+    QSizePolicy, QDialog, QSlider, QSpinBox, QDoubleSpinBox, QFormLayout, QTabWidget, QComboBox
 )
 from PySide6.QtGui import QPainter, QPen, QColor, QGuiApplication, QImage, QPixmap, QIcon
 
@@ -87,6 +87,11 @@ DEFAULT_CFG = {
     "DRAG_FEEDBACK_INTERVAL": 0.15, # 動態拖曳中檢查箭頭間隔（秒）
     "DRAG_ANGLE_TOLERANCE": 25.0,   # 動態拖曳中角度變化容忍度（度）
     "DRAG_MIN_TIME": 0.3,           # 動態拖曳最短時間（秒）
+    
+    # 呼吸式箭頭處理參數
+    "ARROW_BREATHING_CYCLE": 1.0,    # 箭頭呼吸週期（秒）
+    "ARROW_MISS_TOLERANCE_TIME": 0.5, # 容忍箭頭消失時間（秒）
+    "DIRECTION_CHANGE_THRESHOLD": 3,  # 方向改變確認次數
 
     # 主流程
     "MAX_ARROW_ATTEMPTS": 6,
@@ -417,6 +422,32 @@ class ConfigDialog(QDialog):
         self.angle_relock_std_spin.setValue(self.cfg["ANGLE_RELOCK_STD"])
         dynamic_drag_layout.addRow("角度重鎖定門檻(度):", self.angle_relock_std_spin)
         
+        # 呼吸式箭頭處理
+        dynamic_drag_layout.addRow("", QLabel())  # 分隔線
+        breathing_label = QLabel("呼吸式箭頭處理:")
+        breathing_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        dynamic_drag_layout.addRow(breathing_label)
+        
+        # 箭頭呼吸週期
+        self.arrow_breathing_cycle_spin = QDoubleSpinBox()
+        self.arrow_breathing_cycle_spin.setRange(0.5, 3.0)
+        self.arrow_breathing_cycle_spin.setSingleStep(0.1)
+        self.arrow_breathing_cycle_spin.setValue(self.cfg["ARROW_BREATHING_CYCLE"])
+        dynamic_drag_layout.addRow("箭頭呼吸週期(秒):", self.arrow_breathing_cycle_spin)
+        
+        # 容忍消失時間
+        self.arrow_miss_tolerance_time_spin = QDoubleSpinBox()
+        self.arrow_miss_tolerance_time_spin.setRange(0.1, 2.0)
+        self.arrow_miss_tolerance_time_spin.setSingleStep(0.1)
+        self.arrow_miss_tolerance_time_spin.setValue(self.cfg["ARROW_MISS_TOLERANCE_TIME"])
+        dynamic_drag_layout.addRow("容忍消失時間(秒):", self.arrow_miss_tolerance_time_spin)
+        
+        # 方向改變確認次數
+        self.direction_change_threshold_spin = QSpinBox()
+        self.direction_change_threshold_spin.setRange(1, 10)
+        self.direction_change_threshold_spin.setValue(self.cfg["DIRECTION_CHANGE_THRESHOLD"])
+        dynamic_drag_layout.addRow("方向改變確認次數:", self.direction_change_threshold_spin)
+        
         tabs.addTab(dynamic_drag_tab, "動態拖曳")
         
         # 時間控制標籤頁
@@ -444,6 +475,84 @@ class ConfigDialog(QDialog):
         timing_layout.addRow("最大箭頭嘗試次數:", self.max_attempts_spin)
         
         tabs.addTab(timing_tab, "時間控制")
+        
+        # 高級設定標籤頁
+        advanced_tab = QWidget()
+        advanced_layout = QFormLayout(advanced_tab)
+        
+        # 箭頭輪詢間隔
+        self.arrow_poll_interval_spin = QDoubleSpinBox()
+        self.arrow_poll_interval_spin.setRange(0.01, 0.5)
+        self.arrow_poll_interval_spin.setSingleStep(0.01)
+        self.arrow_poll_interval_spin.setDecimals(3)
+        self.arrow_poll_interval_spin.setValue(self.cfg["ARROW_POLL_INTERVAL"])
+        advanced_layout.addRow("箭頭輪詢間隔(秒):", self.arrow_poll_interval_spin)
+        
+        # 拖曳按鈕選擇
+        self.drag_button_combo = QPushButton("left")
+        def toggle_drag_button():
+            current = self.drag_button_combo.text()
+            new_button = "right" if current == "left" else "left"
+            self.drag_button_combo.setText(new_button)
+        self.drag_button_combo.clicked.connect(toggle_drag_button)
+        self.drag_button_combo.setText(self.cfg["DRAG_BUTTON"])
+        advanced_layout.addRow("拖曳按鈕:", self.drag_button_combo)
+        
+        # 拖曳會話最長時間
+        self.drag_session_max_spin = QDoubleSpinBox()
+        self.drag_session_max_spin.setRange(1.0, 30.0)
+        self.drag_session_max_spin.setSingleStep(1.0)
+        self.drag_session_max_spin.setValue(self.cfg["DRAG_SESSION_MAX"])
+        advanced_layout.addRow("拖曳會話最長時間(秒):", self.drag_session_max_spin)
+        
+        # 角度中止門檻
+        self.angle_abort_deg_spin = QDoubleSpinBox()
+        self.angle_abort_deg_spin.setRange(10.0, 120.0)
+        self.angle_abort_deg_spin.setSingleStep(5.0)
+        self.angle_abort_deg_spin.setValue(self.cfg["ANGLE_ABORT_DEG"])
+        advanced_layout.addRow("角度中止門檻(度):", self.angle_abort_deg_spin)
+        
+        # 角度平滑係數
+        self.angle_smooth_alpha_spin = QDoubleSpinBox()
+        self.angle_smooth_alpha_spin.setRange(0.1, 1.0)
+        self.angle_smooth_alpha_spin.setSingleStep(0.05)
+        self.angle_smooth_alpha_spin.setValue(self.cfg["ANGLE_SMOOTH_ALPHA"])
+        advanced_layout.addRow("角度平滑係數:", self.angle_smooth_alpha_spin)
+        
+        # 箭頭消失容忍次數
+        self.arrow_miss_tolerance_spin = QSpinBox()
+        self.arrow_miss_tolerance_spin.setRange(1, 20)
+        self.arrow_miss_tolerance_spin.setValue(self.cfg["ARROW_MISS_TOLERANCE"])
+        advanced_layout.addRow("箭頭消失容忍次數:", self.arrow_miss_tolerance_spin)
+        
+        # 分隔線
+        advanced_layout.addRow("", QLabel())
+        delay_label = QLabel("時間延遲設定:")
+        delay_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        advanced_layout.addRow(delay_label)
+        
+        # 預防性點擊延遲
+        self.preventive_click_delay_spin = QDoubleSpinBox()
+        self.preventive_click_delay_spin.setRange(0.05, 1.0)
+        self.preventive_click_delay_spin.setSingleStep(0.05)
+        self.preventive_click_delay_spin.setValue(self.cfg["PREVENTIVE_CLICK_DELAY"])
+        advanced_layout.addRow("預防性點擊延遲(秒):", self.preventive_click_delay_spin)
+        
+        # 移動後延遲
+        self.post_move_delay_spin = QDoubleSpinBox()
+        self.post_move_delay_spin.setRange(0.05, 1.0)
+        self.post_move_delay_spin.setSingleStep(0.05)
+        self.post_move_delay_spin.setValue(self.cfg["POST_MOVE_DELAY"])
+        advanced_layout.addRow("移動後延遲(秒):", self.post_move_delay_spin)
+        
+        # 最終檢查延遲
+        self.final_check_delay_spin = QDoubleSpinBox()
+        self.final_check_delay_spin.setRange(0.05, 1.0)
+        self.final_check_delay_spin.setSingleStep(0.05)
+        self.final_check_delay_spin.setValue(self.cfg["FINAL_CHECK_DELAY"])
+        advanced_layout.addRow("最終檢查延遲(秒):", self.final_check_delay_spin)
+        
+        tabs.addTab(advanced_tab, "高級設定")
         
         layout.addWidget(tabs)
         
@@ -538,6 +647,22 @@ class ConfigDialog(QDialog):
         self.angle_ok_std_spin.setValue(DEFAULT_CFG["ANGLE_OK_STD"])
         self.angle_relock_std_spin.setValue(DEFAULT_CFG["ANGLE_RELOCK_STD"])
         
+        # 呼吸式箭頭處理
+        self.arrow_breathing_cycle_spin.setValue(DEFAULT_CFG["ARROW_BREATHING_CYCLE"])
+        self.arrow_miss_tolerance_time_spin.setValue(DEFAULT_CFG["ARROW_MISS_TOLERANCE_TIME"])
+        self.direction_change_threshold_spin.setValue(DEFAULT_CFG["DIRECTION_CHANGE_THRESHOLD"])
+        
+        # 高級設定
+        self.arrow_poll_interval_spin.setValue(DEFAULT_CFG["ARROW_POLL_INTERVAL"])
+        self.drag_button_combo.setText(DEFAULT_CFG["DRAG_BUTTON"])
+        self.drag_session_max_spin.setValue(DEFAULT_CFG["DRAG_SESSION_MAX"])
+        self.angle_abort_deg_spin.setValue(DEFAULT_CFG["ANGLE_ABORT_DEG"])
+        self.angle_smooth_alpha_spin.setValue(DEFAULT_CFG["ANGLE_SMOOTH_ALPHA"])
+        self.arrow_miss_tolerance_spin.setValue(DEFAULT_CFG["ARROW_MISS_TOLERANCE"])
+        self.preventive_click_delay_spin.setValue(DEFAULT_CFG["PREVENTIVE_CLICK_DELAY"])
+        self.post_move_delay_spin.setValue(DEFAULT_CFG["POST_MOVE_DELAY"])
+        self.final_check_delay_spin.setValue(DEFAULT_CFG["FINAL_CHECK_DELAY"])
+        
     def get_config(self):
         """返回更新後的配置"""
         self.cfg["ICON_CONFIDENCE"] = self.icon_confidence_slider.value() / 100.0
@@ -577,6 +702,22 @@ class ConfigDialog(QDialog):
         self.cfg["DRAG_MIN_TIME"] = self.drag_min_dynamic_time_spin.value()
         self.cfg["ANGLE_OK_STD"] = self.angle_ok_std_spin.value()
         self.cfg["ANGLE_RELOCK_STD"] = self.angle_relock_std_spin.value()
+        
+        # 呼吸式箭頭處理設置
+        self.cfg["ARROW_BREATHING_CYCLE"] = self.arrow_breathing_cycle_spin.value()
+        self.cfg["ARROW_MISS_TOLERANCE_TIME"] = self.arrow_miss_tolerance_time_spin.value()
+        self.cfg["DIRECTION_CHANGE_THRESHOLD"] = self.direction_change_threshold_spin.value()
+        
+        # 高級設定
+        self.cfg["ARROW_POLL_INTERVAL"] = self.arrow_poll_interval_spin.value()
+        self.cfg["DRAG_BUTTON"] = self.drag_button_combo.text()
+        self.cfg["DRAG_SESSION_MAX"] = self.drag_session_max_spin.value()
+        self.cfg["ANGLE_ABORT_DEG"] = self.angle_abort_deg_spin.value()
+        self.cfg["ANGLE_SMOOTH_ALPHA"] = self.angle_smooth_alpha_spin.value()
+        self.cfg["ARROW_MISS_TOLERANCE"] = self.arrow_miss_tolerance_spin.value()
+        self.cfg["PREVENTIVE_CLICK_DELAY"] = self.preventive_click_delay_spin.value()
+        self.cfg["POST_MOVE_DELAY"] = self.post_move_delay_spin.value()
+        self.cfg["FINAL_CHECK_DELAY"] = self.final_check_delay_spin.value()
         
         return self.cfg
 
@@ -972,7 +1113,7 @@ class ArrowDetector:
         動態拖曳：在拖曳過程中持續偵測箭頭方向並動態調整
         - 如果箭頭方向保持一致，繼續拖曳直到max_hold_seconds
         - 如果箭頭方向改變超過閾值，立即停止
-        - 如果箭頭消失，立即停止
+        - 處理呼吸式箭頭：短暫消失不中斷，持續消失才停止
         """
         def log(msg):
             if log_fn:
@@ -985,6 +1126,11 @@ class ArrowDetector:
         angle_tolerance = float(cfg.get("DRAG_ANGLE_TOLERANCE", 25.0))   # 角度變化容忍度
         min_drag_time = float(cfg.get("DRAG_MIN_TIME", 0.3))             # 最短拖曳時間
         
+        # 呼吸式箭頭處理參數
+        breathing_cycle = float(cfg.get("ARROW_BREATHING_CYCLE", 1.0))   # 呼吸週期（秒）
+        miss_tolerance_time = float(cfg.get("ARROW_MISS_TOLERANCE_TIME", 0.5))  # 容忍消失時間
+        direction_change_threshold = int(cfg.get("DIRECTION_CHANGE_THRESHOLD", 3))  # 方向改變確認次數
+        
         # 計算初始目標位置
         rad = math.radians(initial_angle_deg)
         dx = self.drag_distance * math.sin(rad)
@@ -995,7 +1141,7 @@ class ArrowDetector:
         cx = int(round(cx)); cy = int(round(cy))
         tx = int(round(tx)); ty = int(round(ty))
         
-        log(f"[動態拖曳] 開始：角度{initial_angle_deg:.1f}°，最長{max_hold_seconds:.2f}s")
+        log(f"[動態拖曳] 開始：角度{initial_angle_deg:.1f}°，最長{max_hold_seconds:.2f}s（處理呼吸式箭頭）")
         
         # 開始拖曳
         pyautogui.moveTo(cx, cy)
@@ -1005,6 +1151,13 @@ class ArrowDetector:
         drag_start_time = time.time()
         last_check_time = drag_start_time
         total_corrections = 0
+        
+        # 呼吸式箭頭追蹤變數
+        consecutive_misses = 0
+        miss_start_time = None
+        consecutive_direction_changes = 0
+        last_valid_angle = initial_angle_deg
+        angle_history = []  # 記錄最近的角度變化
         
         try:
             while True:
@@ -1032,36 +1185,70 @@ class ArrowDetector:
                     )
                     
                     if hits == 0:
-                        log(f"[動態拖曳] 箭頭消失，提前結束（已拖{elapsed:.2f}s）")
-                        break
-                    
-                    if current_angle is not None:
-                        angle_diff = self._angle_diff(initial_angle_deg, current_angle)
+                        # 箭頭未檢測到
+                        consecutive_misses += 1
+                        if miss_start_time is None:
+                            miss_start_time = current_time
                         
-                        if angle_diff > angle_tolerance:
-                            log(f"[動態拖曳] 方向改變{angle_diff:.1f}°>容忍{angle_tolerance}°，提前結束（已拖{elapsed:.2f}s）")
+                        miss_duration = current_time - miss_start_time
+                        
+                        # 檢查是否為呼吸式暫時消失
+                        if miss_duration < miss_tolerance_time:
+                            # 在容忍時間內，可能是呼吸式閃爍，繼續等待
+                            if consecutive_misses == 1:  # 只在第一次記錄
+                                log(f"[動態拖曳] 箭頭暫時消失，等待呼吸式恢復...")
+                        else:
+                            # 超過容忍時間，可能真的消失了
+                            log(f"[動態拖曳] 箭頭持續消失{miss_duration:.2f}s，可能已到達目標，結束拖曳（已拖{elapsed:.2f}s）")
                             break
+                    else:
+                        # 檢測到箭頭，重置消失計數
+                        if consecutive_misses > 0:
+                            log(f"[動態拖曳] 箭頭恢復檢測，繼續拖曳")
+                        consecutive_misses = 0
+                        miss_start_time = None
                         
-                        # 如果角度變化不大但有微調空間，可以調整目標位置
-                        if angle_diff > 8.0 and total_corrections < 2:  # 允許小幅修正，但限制次數
-                            # 重新計算目標位置
-                            new_rad = math.radians(current_angle)
-                            new_dx = self.drag_distance * math.sin(new_rad)
-                            new_dy = -self.drag_distance * math.cos(new_rad)
-                            new_tx = max(0, min(sw - 1, updated_cx + new_dx))
-                            new_ty = max(0, min(sh - 1, updated_cy + new_dy))
+                        if current_angle is not None:
+                            angle_diff = self._angle_diff(initial_angle_deg, current_angle)
                             
-                            # 平滑調整到新位置
-                            pyautogui.moveTo(int(new_tx), int(new_ty), duration=0.1)
-                            total_corrections += 1
-                            log(f"[動態拖曳] 微調方向：{initial_angle_deg:.1f}°→{current_angle:.1f}° (第{total_corrections}次)")
-                            initial_angle_deg = current_angle  # 更新基準角度
-                        
-                        elif angle_diff <= 8.0:
-                            # 方向很好，可以考慮延長拖曳
-                            if current_std is not None and current_std < 10.0 and elapsed < max_hold_seconds * 0.7:
-                                # 角度很穩定，可以繼續拖更久
-                                pass
+                            # 記錄角度歷史（最多保留最近5個）
+                            angle_history.append(current_angle)
+                            if len(angle_history) > 5:
+                                angle_history.pop(0)
+                            
+                            # 檢查方向是否持續改變
+                            significant_change = angle_diff > angle_tolerance
+                            
+                            if significant_change:
+                                consecutive_direction_changes += 1
+                                
+                                # 需要多次確認才停止（避免呼吸式閃爍造成的誤判）
+                                if consecutive_direction_changes >= direction_change_threshold:
+                                    log(f"[動態拖曳] 方向持續改變{consecutive_direction_changes}次，"
+                                        f"最終偏差{angle_diff:.1f}°>容忍{angle_tolerance}°，確認方向錯誤，停止拖曳（已拖{elapsed:.2f}s）")
+                                    break
+                                else:
+                                    log(f"[動態拖曳] 檢測到方向改變{angle_diff:.1f}°（第{consecutive_direction_changes}/{direction_change_threshold}次），繼續確認...")
+                            else:
+                                # 方向正常，重置計數
+                                consecutive_direction_changes = 0
+                                
+                                # 如果角度變化不大但有微調空間，可以調整目標位置
+                                if 8.0 < angle_diff <= 15.0 and total_corrections < 2:  # 允許小幅修正
+                                    # 重新計算目標位置
+                                    new_rad = math.radians(current_angle)
+                                    new_dx = self.drag_distance * math.sin(new_rad)
+                                    new_dy = -self.drag_distance * math.cos(new_rad)
+                                    new_tx = max(0, min(sw - 1, updated_cx + new_dx))
+                                    new_ty = max(0, min(sh - 1, updated_cy + new_dy))
+                                    
+                                    # 平滑調整到新位置
+                                    pyautogui.moveTo(int(new_tx), int(new_ty), duration=0.1)
+                                    total_corrections += 1
+                                    log(f"[動態拖曳] 微調方向：{initial_angle_deg:.1f}°→{current_angle:.1f}° (第{total_corrections}次)")
+                                    initial_angle_deg = current_angle  # 更新基準角度
+                            
+                            last_valid_angle = current_angle
                     
                     last_check_time = current_time
                 
@@ -1071,7 +1258,7 @@ class ArrowDetector:
         finally:
             pyautogui.mouseUp(button=self.drag_button)
             final_elapsed = time.time() - drag_start_time
-            log(f"[動態拖曳] 完成：實際拖曳{final_elapsed:.2f}s，微調{total_corrections}次")
+            log(f"[動態拖曳] 完成：實際拖曳{final_elapsed:.2f}s，微調{total_corrections}次，方向改變確認{consecutive_direction_changes}次")
 
     def _hold_drag_seconds(self, cx, cy, angle_deg, hold_seconds):
         """
@@ -1997,12 +2184,12 @@ class MainWindow(QWidget):
         if status == "running":
             self.btn_start.setEnabled(False)
             self.btn_stop.setEnabled(True)
-            self.btn_start.setText("▶ 運行中...")
+            self.btn_start.setText("運行中...")
         elif status == "stopped":
             self.btn_start.setEnabled(True)
             self.btn_stop.setEnabled(False)
-            self.btn_start.setText("▶ 開始")
-            self.btn_stop.setText("⏹ 停止")
+            self.btn_start.setText("開始")
+            self.btn_stop.setText("停止")
 
     def on_start(self):
         self._ui_to_cfg(); save_cfg(self.cfg)
