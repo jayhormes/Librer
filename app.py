@@ -1913,7 +1913,7 @@ class RegionPicker(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Librer - [V.1.0.0, 2025/08/25]")
+        self.setWindowTitle("Librer - [V.1.1.0, 2025/08/26]")
         
         # 設置窗口圖標
         zeny_ico_path = resource_path("zeny.ico")
