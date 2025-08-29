@@ -537,81 +537,205 @@ class ArrowDetector:
         else:
             return None, None
 
+    def _circular_stats(self, angles_deg):
+        """回傳 (均值角度deg, R, circular_std_deg)；angles_deg 為 list[float]"""
+        if not angles_deg:
+            return None, 0.0, None
+        ang = np.deg2rad(np.array(angles_deg, dtype=np.float64))
+        C = np.cos(ang).sum()
+        S = np.sin(ang).sum()
+        n = max(len(angles_deg), 1)
+        R = np.sqrt(C*C + S*S) / n
+        mean_rad = math.atan2(S, C)
+        mean_deg = (math.degrees(mean_rad) + 360) % 360
+        # circular std（R<=1），避免 log(0)
+        R = max(min(R, 0.999999), 1e-6)
+        circ_std_rad = math.sqrt(-2.0 * math.log(R))
+        circ_std_deg = math.degrees(circ_std_rad)
+        return mean_deg, R, circ_std_deg
+
+    def _internal_angle_deg(self, a, b, c):
+        """回傳點 b 的內角角度（a-b-c）"""
+        v1 = a - b
+        v2 = c - b
+        n1 = np.linalg.norm(v1) + 1e-9
+        n2 = np.linalg.norm(v2) + 1e-9
+        cosang = np.clip(np.dot(v1, v2) / (n1 * n2), -1.0, 1.0)
+        return math.degrees(math.acos(cosang))
+
+    def _preprocess_red_mask(self, img_bgr):
+        """
+        回傳更穩定的紅色遮罩：
+        - HSV 兩段紅 + 自適應 S/V 下限（使用百分位數）
+        - Lab a* 強化紅色
+        - 開閉運算去雜訊
+        """
+        hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
+
+        # 對 V 做 CLAHE 提升陰影區辨識
+        h, s, v = cv2.split(hsv)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+        v = clahe.apply(v)
+        hsv = cv2.merge([h, s, v])
+
+        # 自適應 S/V 下界（避免過暗或過灰被忽略）
+        s_floor = int(np.percentile(s.flatten(), 70))
+        v_floor = int(np.percentile(v.flatten(), 50))
+        s_floor = max(60, min(180, s_floor - 10))
+        v_floor = max(60, min(180, v_floor - 10))
+
+        mask1 = cv2.inRange(hsv, (0,   s_floor, v_floor), (10, 255, 255))
+        mask2 = cv2.inRange(hsv, (170, s_floor, v_floor), (180, 255, 255))
+        mask_hsv = cv2.bitwise_or(mask1, mask2)
+
+        # Lab a* 強化紅（a* 偏高代表偏紅）
+        lab = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2LAB)
+        a = lab[:,:,1]
+        a_thr = int(np.percentile(a.flatten(), 85))  # 偏嚴格，避免白/橙誤判
+        mask_a = (a > a_thr).astype(np.uint8) * 255
+
+        mask = cv2.bitwise_and(mask_hsv, mask_a)
+
+        # 去雜訊（先開再閉）
+        mask = cv2.medianBlur(mask, 3)
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=1)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
+        return mask
+
+    def _score_arrow_candidate(self, cnt, center_xy):
+        """
+        對候選輪廓評分並求方向：
+        - 盡量以「最銳利頂點」當箭頭尖端；找不到就用「距中心最遠點」
+        - 回傳 (score, angle_deg, top_left, has_acute_tip)
+        """
+        area = cv2.contourArea(cnt)
+        if area < self.min_area:
+            return -1, None, None, False
+
+        x, y, w, h = cv2.boundingRect(cnt)
+        rect_area = max(w*h, 1)
+        extent = area / rect_area
+        if not (0.30 <= extent <= 0.92):
+            return -1, None, None, False
+
+        hull = cv2.convexHull(cnt)
+        hull_area = cv2.contourArea(hull) or 1
+        solidity = area / hull_area
+        if solidity < 0.70:  # 稍微放寬，因為箭頭尖端會降低 solidity
+            return -1, None, None, False
+
+        peri = cv2.arcLength(cnt, True) or 1
+        circularity = 4 * math.pi * area / (peri * peri)
+        if circularity > 0.85:  # 越圓越不像箭頭
+            return -1, None, None, False
+
+        # 多邊形近似，找最小內角的頂點（箭頭尖端）
+        eps = 0.02 * peri
+        approx = cv2.approxPolyDP(cnt, eps, True)
+        pts = approx.reshape(-1, 2).astype(np.float32)
+
+        has_acute_tip = False
+        tip = None
+        if len(pts) >= 3:
+            min_angle = 1e9
+            for i in range(len(pts)):
+                a = pts[(i-1) % len(pts)]
+                b = pts[i]
+                c = pts[(i+1) % len(pts)]
+                ang = self._internal_angle_deg(a, b, c)
+                if ang < min_angle:
+                    min_angle = ang
+                    tip = b
+            if min_angle < 70:  # 夠尖，視為箭頭
+                has_acute_tip = True
+
+        cx, cy = center_xy
+        if tip is None or not has_acute_tip:
+            # 退而求其次：用相對人物中心最遠點
+            cnt_pts = cnt.reshape(-1, 2).astype(np.float32)
+            d2 = np.square(cnt_pts[:,0]-cx) + np.square(cnt_pts[:,1]-cy)
+            tip = cnt_pts[int(np.argmax(d2))]
+
+        dx = float(tip[0] - cx)
+        dy = float(tip[1] - cy)
+        angle_deg = (math.degrees(math.atan2(dx, -dy)) + 360) % 360
+
+        # 綜合評分：面積、extent、solidity、是否有銳角尖端、長寬比
+        ar = w / max(h, 1)
+        ar_score = 1.0 if 0.4 <= ar <= 2.8 else 0.7
+        tip_bonus = 1.25 if has_acute_tip else 1.0
+        score = area * (0.45 + 0.25*extent + 0.20*solidity + 0.10*ar_score) * tip_bonus
+
+        return score, angle_deg, (int(x), int(y)), has_acute_tip
+
     def find_arrow_by_color(self, search_center_x, search_center_y):
-        sx = search_center_x - self.arrow_search_radius
-        sy = search_center_y - self.arrow_search_radius
-        sw = sh = self.arrow_search_radius * 2
+        """
+        升級版：HSV+Lab 遮罩 + 尖端導向 + 穩定評分
+        回： (top_left_global, 1.0, angle_deg) 或 (None, None, None)
+        """
+        r = self.arrow_search_radius
+        sx = int(round(search_center_x - r))
+        sy = int(round(search_center_y - r))
+        sw = sh = int(round(2*r))
         sx, sy, sw, sh = clamp_region_to_screen(sx, sy, sw, sh)
+
         try:
             pil_img = pyautogui.screenshot(region=(sx, sy, sw, sh))
         except pyautogui.PyAutoGUIException:
             return None, None, None
-        img = np.array(pil_img)
-        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
 
-        mask1 = cv2.inRange(hsv, (0, 80, 80), (10, 255, 255))
-        mask2 = cv2.inRange(hsv, (170, 80, 80), (180, 255, 255))
-        mask = cv2.bitwise_or(mask1, mask2)
+        img = np.array(pil_img)[:, :, ::-1]  # to BGR
+        mask = self._preprocess_red_mask(img)
 
-        mask = cv2.medianBlur(mask, 3)
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5,5))
-        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=1)
-
+        # 找候選
         cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
-        best = None
-        best_score = -1
+        best = (-1, None, None, False)  # (score, angle, top_left, tipflag)
         for c in cnts:
-            area = cv2.contourArea(c)
-            if area < self.min_area:
-                continue
-            x, y, w, h = cv2.boundingRect(c)
-            rect_area = w * h or 1
-            extent = area / rect_area
-            if not (0.35 <= extent <= 0.90):
-                continue
-            hull = cv2.convexHull(c)
-            hull_area = cv2.contourArea(hull) or 1
-            solidity = area / hull_area
-            if solidity < 0.75:
-                continue
-            peri = cv2.arcLength(c, True) or 1
-            circularity = 4 * math.pi * area / (peri * peri)
-            if circularity > 0.8:
-                continue
-            score = area * (0.5 + 0.3*extent + 0.2*solidity)
-            if score > best_score:
-                best_score = score
-                best = c
+            # 將局部座標換算為全域前，先用局部判斷
+            score, ang, tl, tip_ok = self._score_arrow_candidate(c, center_xy=(r, r))
+            if score > best[0]:
+                best = (score, ang, tl, tip_ok)
 
-        if best is None:
+        if best[0] < 0 or best[1] is None:
             return None, None, None
-        M = cv2.moments(best)
-        if M["m00"] == 0:
-            return None, None, None
-        cx_local = M["m10"] / M["m00"]
-        cy_local = M["m01"] / M["m00"]
-        cx = cx_local + sx
-        cy = cy_local + sy
-        dx = cx - search_center_x
-        dy = cy - search_center_y
-        angle_deg = (math.degrees(math.atan2(dx, -dy)) + 360) % 360
-        x, y, w, h = cv2.boundingRect(best)
-        top_left_global = (int(x + sx), int(y + sy))
-        return top_left_global, 1.0, angle_deg
+
+        # 轉回全域 top-left
+        tl_local = best[2]
+        top_left_global = (int(tl_local[0] + sx), int(tl_local[1] + sy))
+        return top_left_global, 1.0, float(best[1])
 
     def wait_for_arrow(self, center_x, center_y):
+        """
+        收集樣本直到：
+        - 命中數量 >= min_hits，且
+        - 角度「環向標準差」足夠小（例如 <= 14°）→ 早收斂
+        超時仍不足則維持舊邏輯。
+        """
         angles = []
         last_loc = None
         t0 = time.time()
+
+        # 可視情況微調
+        early_stop_std_deg = 14.0
+
         while time.time() - t0 < self.timeout:
             loc, _, ang = self.find_arrow_by_color(center_x, center_y)
             if loc is not None and ang is not None:
                 angles.append(ang)
                 last_loc = loc
+
+                if len(angles) >= self.min_hits:
+                    mean_deg, R, std_deg = self._circular_stats(angles)
+                    # 集中度高（std 小）則提前返回
+                    if std_deg is not None and std_deg <= early_stop_std_deg:
+                        return last_loc, mean_deg, len(angles)
             time.sleep(self.poll)
+
         if len(angles) >= self.min_hits:
-            return last_loc, circular_mean_deg(angles), len(angles)
+            mean_deg, _, _ = self._circular_stats(angles)
+            return last_loc, mean_deg, len(angles)
         return None, None, 0
 
     def drag_towards_arrow(self, center_x, center_y, angle_deg):
@@ -626,7 +750,7 @@ class ArrowDetector:
         pyautogui.moveTo(cx, cy)
         pyautogui.mouseDown(button=self.drag_button)
         pyautogui.moveTo(tx, ty, duration=self.drag_seconds)
-        pyautogui.mouseUp(button=self.drag_button)
+        pyautogui.mouseUp(button=self.drag_button)      
 
 # ==========================
 # Worker 執行緒（Start/Pause/Stop）
