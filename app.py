@@ -1652,7 +1652,7 @@ class MainWindow(QWidget):
             except ValueError:
                 self.append_log("目標圖標區域格式錯誤，請使用 x,y,w,h 格式")
         
-        # 檢查人物/箭頭區域
+        # 檢查人物活動區域
         if char_text and "," in char_text:
             try:
                 values = list(map(int, char_text.split(",")))
@@ -1661,11 +1661,11 @@ class MainWindow(QWidget):
                     dx, dy, dw, dh = values
                     lx, ly, lw, lh = self._device_to_logical_rect(dx, dy, dw, dh)
                     region_rect = QRect(lx, ly, lw, lh)
-                    regions_to_preview.append((region_rect, "人物/箭頭區域", QColor(255, 165, 0, 255)))  # 橙色
-                    self.append_log(f"準備預覽人物/箭頭區域: 實際({dx}, {dy}, {dw}, {dh}) -> 邏輯({lx}, {ly}, {lw}, {lh})")
+                    regions_to_preview.append((region_rect, "人物活動區域", QColor(255, 165, 0, 255)))  # 橙色
+                    self.append_log(f"準備預覽人物活動區域: 實際({dx}, {dy}, {dw}, {dh}) -> 邏輯({lx}, {ly}, {lw}, {lh})")
             except ValueError:
-                self.append_log("人物/箭頭區域格式錯誤，請使用 x,y,w,h 格式")
-        
+                self.append_log("人物活動區域格式錯誤，請使用 x,y,w,h 格式")
+
         if regions_to_preview:
             try:
                 self.preview_overlay = RegionPreviewOverlay(regions_to_preview, self)
@@ -1674,8 +1674,8 @@ class MainWindow(QWidget):
             except Exception as e:
                 self.append_log(f"預覽遮罩顯示失敗: {e}")
         else:
-            self.append_log("請先設定目標圖標區域或人物/箭頭區域後再預覽")
-            QMessageBox.information(self, "提示", "請先設定目標圖標區域或人物/箭頭區域後再預覽")
+            self.append_log("請先設定目標圖標區域或人物活動區域後再預覽")
+            QMessageBox.information(self, "提示", "請先設定目標圖標區域或人物活動區域後再預覽")
 
     def _adjust_window_size(self):
         """調整視窗大小以適應內容"""
