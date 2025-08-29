@@ -158,12 +158,17 @@ def circular_mean_deg(angles_deg):
     return (math.degrees(mean_rad) + 360) % 360
 
 def clamp_region_to_screen(x, y, w, h):
-    sw, sh = pyautogui.size()
-    x = int(round(max(0, min(x, sw - 1))))
-    y = int(round(max(0, min(y, sh - 1))))
-    w = int(round(max(1, min(w, sw - x))))
-    h = int(round(max(1, min(h, sh - y))))
-    return x, y, w, h
+    try:
+        sw, sh = pyautogui.size()
+        x = int(round(max(0, min(x, sw - 1))))
+        y = int(round(max(0, min(y, sh - 1))))
+        w = int(round(max(1, min(w, sw - x))))
+        h = int(round(max(1, min(h, sh - y))))
+        return x, y, w, h
+    except Exception as e:
+        print(f"[警告] 螢幕區域限制失敗: {e}")
+        # 返回安全的預設值
+        return 0, 0, 100, 100
 
 # ==========================
 # 視窗管理功能
@@ -964,33 +969,68 @@ class ArrowDetector:
         self.template_width, self.template_height = self.template_img.shape[::-1]
 
     def find_character(self):
-        rx, ry, rw, rh = map(int, self.search_region)
-        screenshot = pyautogui.screenshot(region=(rx, ry, rw, rh))
-        screenshot_np = np.array(screenshot)
-        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+        try:
+            rx, ry, rw, rh = map(int, self.search_region)
+            
+            try:
+                screenshot = pyautogui.screenshot(region=(rx, ry, rw, rh))
+            except pyautogui.PyAutoGUIException as e:
+                print(f"[警告] 人物偵測螢幕截圖失敗: {e}")
+                return None, None
+            except Exception as e:
+                print(f"[警告] 人物偵測螢幕截圖異常: {e}")
+                return None, None
+                
+            if screenshot is None:
+                print("[警告] 人物偵測截圖返回空值")
+                return None, None
+                
+            try:
+                screenshot_np = np.array(screenshot)
+                if screenshot_np.size == 0:
+                    print("[警告] 人物偵測截圖圖像為空")
+                    return None, None
+                    
+                screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+            except Exception as e:
+                print(f"[警告] 人物偵測圖像轉換失敗: {e}")
+                return None, None
 
-        found_location = None
-        max_corr = -1.0
-        best_scale = None
-        th, tw = self.template_img.shape[:2]
+            found_location = None
+            max_corr = -1.0
+            best_scale = None
+            th, tw = self.template_img.shape[:2]
 
-        for scale in np.linspace(self.scale_range[0], self.scale_range[1], self.scale_steps):
-            w = max(1, int(round(tw * scale)))
-            h = max(1, int(round(th * scale)))
-            resized = cv2.resize(self.template_img, (w, h))
-            if h > screenshot_gray.shape[0] or w > screenshot_gray.shape[1]:
-                continue
-            res = cv2.matchTemplate(screenshot_gray, resized, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, max_loc = cv2.minMaxLoc(res)
-            if max_val > max_corr:
-                max_corr = max_val
-                top_left = max_loc
-                found_location = (top_left[0] + rx, top_left[1] + ry)
-                best_scale = scale
+            try:
+                for scale in np.linspace(self.scale_range[0], self.scale_range[1], self.scale_steps):
+                    w = max(1, int(round(tw * scale)))
+                    h = max(1, int(round(th * scale)))
+                    
+                    try:
+                        resized = cv2.resize(self.template_img, (w, h))
+                        if h > screenshot_gray.shape[0] or w > screenshot_gray.shape[1]:
+                            continue
+                        res = cv2.matchTemplate(screenshot_gray, resized, cv2.TM_CCOEFF_NORMED)
+                        _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                        if max_val > max_corr:
+                            max_corr = max_val
+                            top_left = max_loc
+                            found_location = (top_left[0] + rx, top_left[1] + ry)
+                            best_scale = scale
+                    except Exception as e:
+                        print(f"[警告] 人物模板匹配失敗 (scale={scale:.2f}): {e}")
+                        continue
+            except Exception as e:
+                print(f"[警告] 人物偵測尺度循環失敗: {e}")
+                return None, None
 
-        if max_corr >= self.confidence and found_location is not None:
-            return found_location, best_scale
-        else:
+            if max_corr >= self.confidence and found_location is not None:
+                return found_location, best_scale
+            else:
+                return None, None
+                
+        except Exception as e:
+            print(f"[錯誤] 人物偵測整體異常: {e}")
             return None, None
 
     def _circular_stats(self, angles_deg):
@@ -1130,37 +1170,70 @@ class ArrowDetector:
         升級版：HSV+Lab 遮罩 + 尖端導向 + 穩定評分
         回： (top_left_global, 1.0, angle_deg) 或 (None, None, None)
         """
-        r = self.arrow_search_radius
-        sx = int(round(search_center_x - r))
-        sy = int(round(search_center_y - r))
-        sw = sh = int(round(2*r))
-        sx, sy, sw, sh = clamp_region_to_screen(sx, sy, sw, sh)
-
         try:
-            pil_img = pyautogui.screenshot(region=(sx, sy, sw, sh))
-        except pyautogui.PyAutoGUIException:
+            r = self.arrow_search_radius
+            sx = int(round(search_center_x - r))
+            sy = int(round(search_center_y - r))
+            sw = sh = int(round(2*r))
+            sx, sy, sw, sh = clamp_region_to_screen(sx, sy, sw, sh)
+
+            try:
+                pil_img = pyautogui.screenshot(region=(sx, sy, sw, sh))
+            except pyautogui.PyAutoGUIException as e:
+                print(f"[警告] 螢幕截圖失敗: {e}")
+                return None, None, None
+            except Exception as e:
+                print(f"[警告] 螢幕截圖異常: {e}")
+                return None, None, None
+
+            if pil_img is None:
+                print("[警告] 螢幕截圖返回空值")
+                return None, None, None
+
+            try:
+                img = np.array(pil_img)[:, :, ::-1]  # to BGR
+                if img.size == 0:
+                    print("[警告] 截圖圖像為空")
+                    return None, None, None
+                    
+                mask = self._preprocess_red_mask(img)
+            except Exception as e:
+                print(f"[警告] 圖像處理失敗: {e}")
+                return None, None, None
+
+            # 找候選
+            try:
+                cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            except Exception as e:
+                print(f"[警告] 輪廓檢測失敗: {e}")
+                return None, None, None
+
+            best = (-1, None, None, False)  # (score, angle, top_left, tipflag)
+            for c in cnts:
+                try:
+                    # 將局部座標換算為全域前，先用局部判斷
+                    score, ang, tl, tip_ok = self._score_arrow_candidate(c, center_xy=(r, r))
+                    if score > best[0]:
+                        best = (score, ang, tl, tip_ok)
+                except Exception as e:
+                    print(f"[警告] 箭頭候選評分失敗: {e}")
+                    continue
+
+            if best[0] < 0 or best[1] is None:
+                return None, None, None
+
+            # 轉回全域 top-left
+            try:
+                tl_local = best[2]
+                top_left_global = (int(tl_local[0] + sx), int(tl_local[1] + sy))
+                return top_left_global, 1.0, float(best[1])
+            except Exception as e:
+                print(f"[警告] 座標轉換失敗: {e}")
+                return None, None, None
+                
+        except Exception as e:
+            print(f"[錯誤] 箭頭顏色偵測異常: {e}")
             return None, None, None
-
-        img = np.array(pil_img)[:, :, ::-1]  # to BGR
-        mask = self._preprocess_red_mask(img)
-
-        # 找候選
-        cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-
-        best = (-1, None, None, False)  # (score, angle, top_left, tipflag)
-        for c in cnts:
-            # 將局部座標換算為全域前，先用局部判斷
-            score, ang, tl, tip_ok = self._score_arrow_candidate(c, center_xy=(r, r))
-            if score > best[0]:
-                best = (score, ang, tl, tip_ok)
-
-        if best[0] < 0 or best[1] is None:
-            return None, None, None
-
-        # 轉回全域 top-left
-        tl_local = best[2]
-        top_left_global = (int(tl_local[0] + sx), int(tl_local[1] + sy))
-        return top_left_global, 1.0, float(best[1])
 
     def wait_for_arrow(self, center_x, center_y):
         """
@@ -1176,37 +1249,69 @@ class ArrowDetector:
         # 可視情況微調
         early_stop_std_deg = 14.0
 
-        while time.time() - t0 < self.timeout:
-            loc, _, ang = self.find_arrow_by_color(center_x, center_y)
-            if loc is not None and ang is not None:
-                angles.append(ang)
-                last_loc = loc
+        try:
+            while time.time() - t0 < self.timeout:
+                try:
+                    loc, _, ang = self.find_arrow_by_color(center_x, center_y)
+                    if loc is not None and ang is not None:
+                        angles.append(ang)
+                        last_loc = loc
 
-                if len(angles) >= self.min_hits:
-                    mean_deg, R, std_deg = self._circular_stats(angles)
-                    # 集中度高（std 小）則提前返回
-                    if std_deg is not None and std_deg <= early_stop_std_deg:
-                        return last_loc, mean_deg, len(angles)
-            time.sleep(self.poll)
+                        if len(angles) >= self.min_hits:
+                            mean_deg, R, std_deg = self._circular_stats(angles)
+                            # 集中度高（std 小）則提前返回
+                            if std_deg is not None and std_deg <= early_stop_std_deg:
+                                return last_loc, mean_deg, len(angles)
+                except Exception as e:
+                    print(f"[警告] 等待箭頭時偵測異常: {e}")
+                    pass
+                    
+                time.sleep(self.poll)
+        except Exception as e:
+            print(f"[錯誤] 等待箭頭過程異常: {e}")
 
         if len(angles) >= self.min_hits:
-            mean_deg, _, _ = self._circular_stats(angles)
-            return last_loc, mean_deg, len(angles)
+            try:
+                mean_deg, _, _ = self._circular_stats(angles)
+                return last_loc, mean_deg, len(angles)
+            except Exception as e:
+                print(f"[錯誤] 箭頭角度統計異常: {e}")
+                return None, None, 0
         return None, None, 0
 
     def drag_towards_arrow(self, center_x, center_y, angle_deg):
-        sw, sh = pyautogui.size()
-        rad = math.radians(angle_deg)
-        dx = self.drag_distance * math.sin(rad)
-        dy = -self.drag_distance * math.cos(rad)
-        tx = max(0, min(sw - 1, center_x + dx))
-        ty = max(0, min(sh - 1, center_y + dy))
-        cx = int(round(center_x)); cy = int(round(center_y))
-        tx = int(round(tx)); ty = int(round(ty))
-        pyautogui.moveTo(cx, cy)
-        pyautogui.mouseDown(button=self.drag_button)
-        pyautogui.moveTo(tx, ty, duration=self.drag_seconds)
-        pyautogui.mouseUp(button=self.drag_button)     
+        try:
+            sw, sh = pyautogui.size()
+            rad = math.radians(angle_deg)
+            dx = self.drag_distance * math.sin(rad)
+            dy = -self.drag_distance * math.cos(rad)
+            tx = max(0, min(sw - 1, center_x + dx))
+            ty = max(0, min(sh - 1, center_y + dy))
+            cx = int(round(center_x)); cy = int(round(center_y))
+            tx = int(round(tx)); ty = int(round(ty))
+            
+            try:
+                pyautogui.moveTo(cx, cy)
+                pyautogui.mouseDown(button=self.drag_button)
+                pyautogui.moveTo(tx, ty, duration=self.drag_seconds)
+            except Exception as e:
+                print(f"[警告] 箭頭拖曳操作失敗: {e}")
+            finally:
+                try:
+                    pyautogui.mouseUp(button=self.drag_button)
+                except Exception as e:
+                    print(f"[警告] 箭頭拖曳滑鼠釋放失敗: {e}")
+                    try:
+                        pyautogui.mouseUp()
+                    except Exception as e2:
+                        print(f"[錯誤] 箭頭拖曳強制滑鼠釋放也失敗: {e2}")
+        except Exception as e:
+            print(f"[錯誤] 箭頭拖曳整體異常: {e}")
+            # 確保滑鼠狀態正常
+            try:
+                pyautogui.mouseUp()
+            except:
+                pass     
 
     def _circular_stats(self, angles_deg):
         if not angles_deg:
@@ -1223,15 +1328,31 @@ class ArrowDetector:
     def _sample_angle_window(self, cx, cy, window_time):
         t0 = time.time()
         angles = []; last_loc = None
-        while time.time() - t0 < window_time:
-            loc, _, ang = self.find_arrow_by_color(cx, cy)
-            if loc is not None and ang is not None:
-                angles.append(ang); last_loc = loc
-            time.sleep(self.poll)
+        try:
+            while time.time() - t0 < window_time:
+                try:
+                    loc, _, ang = self.find_arrow_by_color(cx, cy)
+                    if loc is not None and ang is not None:
+                        angles.append(ang); last_loc = loc
+                except Exception as e:
+                    # 箭頭偵測失敗，記錄錯誤但繼續嘗試
+                    print(f"[警告] 箭頭偵測異常: {e}")
+                    pass
+                time.sleep(self.poll)
+        except Exception as e:
+            # 整個取樣窗口失敗
+            print(f"[錯誤] 角度取樣窗口異常: {e}")
+            return None, None, None, 0
+            
         if not angles:
             return None, None, None, 0
-        mean, _, std = self._circular_stats(angles)
-        return last_loc, mean, std, len(angles)
+        
+        try:
+            mean, _, std = self._circular_stats(angles)
+            return last_loc, mean, std, len(angles)
+        except Exception as e:
+            print(f"[錯誤] 角度統計計算異常: {e}")
+            return None, None, None, 0
 
     def _angle_diff(self, a, b):
         return abs((b - a + 180) % 360 - 180)
@@ -1300,17 +1421,26 @@ class ArrowDetector:
                 # 檢查是否到了檢查間隔
                 if current_time - last_check_time >= check_interval and elapsed >= min_drag_time:
                     # 重新偵測箭頭方向
-                    updated_center_loc, updated_scale = self.find_character()
-                    if updated_center_loc and updated_scale:
-                        updated_cx = updated_center_loc[0] + (self.template_width * updated_scale) / 2
-                        updated_cy = updated_center_loc[1] + (self.template_height * updated_scale) / 2
-                    else:
+                    try:
+                        updated_center_loc, updated_scale = self.find_character()
+                        if updated_center_loc and updated_scale:
+                            updated_cx = updated_center_loc[0] + (self.template_width * updated_scale) / 2
+                            updated_cy = updated_center_loc[1] + (self.template_height * updated_scale) / 2
+                        else:
+                            updated_cx, updated_cy = cx, cy
+                    except Exception as e:
+                        print(f"[警告] 動態拖曳中人物偵測異常: {e}")
                         updated_cx, updated_cy = cx, cy
                     
                     # 快速檢測當前箭頭角度（短窗口）
-                    _, current_angle, current_std, hits = self._sample_angle_window(
-                        updated_cx, updated_cy, window_time=max(self.poll*2, 0.1)
-                    )
+                    try:
+                        _, current_angle, current_std, hits = self._sample_angle_window(
+                            updated_cx, updated_cy, window_time=max(self.poll*2, 0.1)
+                        )
+                    except Exception as e:
+                        print(f"[警告] 動態拖曳中角度偵測異常: {e}")
+                        # 偵測失敗，視為箭頭消失
+                        current_angle, current_std, hits = None, None, 0
                     
                     if hits == 0:
                         # 箭頭未檢測到
@@ -1384,9 +1514,21 @@ class ArrowDetector:
                 time.sleep(0.05)
                 
         finally:
-            pyautogui.mouseUp(button=self.drag_button)
-            final_elapsed = time.time() - drag_start_time
-            log(f"[動態拖曳] 完成：實際拖曳{final_elapsed:.2f}s，微調{total_corrections}次，方向改變確認{consecutive_direction_changes}次")
+            try:
+                pyautogui.mouseUp(button=self.drag_button)
+            except Exception as e:
+                print(f"[警告] 滑鼠釋放失敗: {e}")
+                # 嘗試強制釋放滑鼠
+                try:
+                    pyautogui.mouseUp()
+                except Exception as e2:
+                    print(f"[錯誤] 強制滑鼠釋放也失敗: {e2}")
+            
+            try:
+                final_elapsed = time.time() - drag_start_time
+                log(f"[動態拖曳] 完成：實際拖曳{final_elapsed:.2f}s，微調{total_corrections}次，方向改變確認{consecutive_direction_changes}次")
+            except Exception as e:
+                print(f"[警告] 動態拖曳完成記錄失敗: {e}")
 
     def _hold_drag_seconds(self, cx, cy, angle_deg, hold_seconds):
         """
@@ -1397,21 +1539,40 @@ class ArrowDetector:
           3) 停留 hold_seconds（保持 mouseDown）
           4) mouseUp
         """
-        sw, sh = pyautogui.size()
-        rad = math.radians(angle_deg)
-        dx = self.drag_distance * math.sin(rad)
-        dy = -self.drag_distance * math.cos(rad)
-        tx = max(0, min(sw - 1, cx + dx))
-        ty = max(0, min(sh - 1, cy + dy))
-        cx = int(round(cx)); cy = int(round(cy))
-        tx = int(round(tx)); ty = int(round(ty))
+        try:
+            sw, sh = pyautogui.size()
+            rad = math.radians(angle_deg)
+            dx = self.drag_distance * math.sin(rad)
+            dy = -self.drag_distance * math.cos(rad)
+            tx = max(0, min(sw - 1, cx + dx))
+            ty = max(0, min(sh - 1, cy + dy))
+            cx = int(round(cx)); cy = int(round(cy))
+            tx = int(round(tx)); ty = int(round(ty))
 
-        pyautogui.moveTo(cx, cy)
-        pyautogui.mouseDown(button=self.drag_button)
-        # 游標快速定位到方向遠點，避免移動時間就是「握住時間」
-        pyautogui.moveTo(tx, ty, duration=min(self.drag_seconds, 0.05))
-        time.sleep(max(0.0, float(hold_seconds)))   # 真正的「握住秒數」
-        pyautogui.mouseUp(button=self.drag_button)
+            try:
+                pyautogui.moveTo(cx, cy)
+                pyautogui.mouseDown(button=self.drag_button)
+                # 游標快速定位到方向遠點，避免移動時間就是「握住時間」
+                pyautogui.moveTo(tx, ty, duration=min(self.drag_seconds, 0.05))
+                time.sleep(max(0.0, float(hold_seconds)))   # 真正的「握住秒數」
+            except Exception as e:
+                print(f"[警告] 固定拖曳操作失敗: {e}")
+            finally:
+                try:
+                    pyautogui.mouseUp(button=self.drag_button)
+                except Exception as e:
+                    print(f"[警告] 固定拖曳滑鼠釋放失敗: {e}")
+                    try:
+                        pyautogui.mouseUp()
+                    except Exception as e2:
+                        print(f"[錯誤] 固定拖曳強制滑鼠釋放也失敗: {e2}")
+        except Exception as e:
+            print(f"[錯誤] 固定拖曳整體異常: {e}")
+            # 確保滑鼠狀態正常
+            try:
+                pyautogui.mouseUp()
+            except:
+                pass
 
     def guide_towards_arrow(self, get_center_fn, cfg, log_fn=None):
         """
@@ -1450,15 +1611,29 @@ class ArrowDetector:
         
         while time.time() - t0 < SESSION_MAX:
             # 重新找人物中心（避免被移動後偏差）
-            center_loc, center_scale = self.find_character()
-            if center_loc and center_scale:
-                cx = center_loc[0] + (self.template_width * center_scale) / 2
-                cy = center_loc[1] + (self.template_height * center_scale) / 2
-            else:
-                cx, cy = get_center_fn()
+            try:
+                center_loc, center_scale = self.find_character()
+                if center_loc and center_scale:
+                    cx = center_loc[0] + (self.template_width * center_scale) / 2
+                    cy = center_loc[1] + (self.template_height * center_scale) / 2
+                else:
+                    cx, cy = get_center_fn()
+            except Exception as e:
+                print(f"[警告] 導航中人物偵測異常: {e}")
+                try:
+                    cx, cy = get_center_fn()
+                except Exception as e2:
+                    print(f"[錯誤] 無法獲取人物中心位置: {e2}")
+                    log("[導航] 人物偵測失敗，結束導航")
+                    return
 
             # 取短窗角度樣本
-            _, mean, std, hits = self._sample_angle_window(cx, cy, window_time=max(self.poll*4, 0.25))
+            try:
+                _, mean, std, hits = self._sample_angle_window(cx, cy, window_time=max(self.poll*4, 0.25))
+            except Exception as e:
+                print(f"[警告] 導航中角度取樣異常: {e}")
+                hits = 0
+                mean = std = None
             if hits == 0:
                 miss += 1
                 # 只在第一次和每隔一段時間記錄，避免頻繁輸出
@@ -1498,18 +1673,23 @@ class ArrowDetector:
 
             hold_seconds = map_std_to_hold(std)
             # 根據穩定性選擇拖曳方式
-            if std is not None and std <= STD_LOW:
-                # 角度很穩定，使用動態拖曳，可以走更遠
-                # 減少輸出頻率：每3次操作才記錄一次
-                if action_count % 3 == 0:
-                    log(f"[導航] 穩定（std={std:.1f}°），動態拖曳最長{hold_seconds:.2f}s")
-                self._dynamic_drag_with_feedback(cx, cy, ema_angle, hold_seconds, cfg, log_fn)
-            else:
-                # 角度不穩定，使用傳統固定時間拖曳，保守一點
-                shorter_hold = min(hold_seconds, HOLD_MIN * 2)  # 限制最長時間
-                if action_count % 3 == 0:
-                    log(f"[導航] 不穩定（std={std:.1f}°），固定拖曳{shorter_hold:.2f}s")
-                self._hold_drag_seconds(cx, cy, ema_angle, shorter_hold)
+            try:
+                if std is not None and std <= STD_LOW:
+                    # 角度很穩定，使用動態拖曳，可以走更遠
+                    # 減少輸出頻率：每3次操作才記錄一次
+                    if action_count % 3 == 0:
+                        log(f"[導航] 穩定（std={std:.1f}°），動態拖曳最長{hold_seconds:.2f}s")
+                    self._dynamic_drag_with_feedback(cx, cy, ema_angle, hold_seconds, cfg, log_fn)
+                else:
+                    # 角度不穩定，使用傳統固定時間拖曳，保守一點
+                    shorter_hold = min(hold_seconds, HOLD_MIN * 2)  # 限制最長時間
+                    if action_count % 3 == 0:
+                        log(f"[導航] 不穩定（std={std:.1f}°），固定拖曳{shorter_hold:.2f}s")
+                    self._hold_drag_seconds(cx, cy, ema_angle, shorter_hold)
+            except Exception as e:
+                print(f"[錯誤] 拖曳操作異常: {e}")
+                log(f"[導航] 拖曳異常，結束導航: {e}")
+                return
             
             action_count += 1
             # 握完立刻再量測（越快越能修正）
@@ -1663,37 +1843,67 @@ class DetectorWorker(QThread):
         """
         先點圖標→找人物→如果角度穩定就連續導航；導航結束後再點圖標確認。
         """
-        # 圖標是否還在
-        current_location, current_scale = icon.find_image_with_scaling()
-        if not current_location:
-            # 避免與主循環重複記錄
-            return False
+        try:
+            # 圖標是否還在
+            try:
+                current_location, current_scale = icon.find_image_with_scaling()
+            except Exception as e:
+                print(f"[警告] 圖標偵測異常: {e}")
+                return False
+                
+            if not current_location:
+                # 避免與主循環重複記錄
+                return False
 
-        # 預防性點一下（喚醒/聚焦）
-        icon.click_center(current_location, current_scale)
-        time.sleep(self.cfg["PREVENTIVE_CLICK_DELAY"])
+            # 預防性點一下（喚醒/聚焦）
+            try:
+                icon.click_center(current_location, current_scale)
+                time.sleep(self.cfg["PREVENTIVE_CLICK_DELAY"])
+            except Exception as e:
+                print(f"[警告] 預防性點擊失敗: {e}")
+                # 點擊失敗不算致命錯誤，繼續執行
 
-        # 找人物中心
-        char_loc, char_scale = arrow.find_character()
-        if not (char_loc and char_scale):
-            return False
+            # 找人物中心
+            try:
+                char_loc, char_scale = arrow.find_character()
+            except Exception as e:
+                print(f"[警告] 箭頭會話中人物偵測異常: {e}")
+                return False
+                
+            if not (char_loc and char_scale):
+                return False
 
-        cx = char_loc[0] + (arrow.template_width * char_scale) / 2
-        cy = char_loc[1] + (arrow.template_height * char_scale) / 2
-        self._log(f"開始閉迴路導航…")
+            try:
+                cx = char_loc[0] + (arrow.template_width * char_scale) / 2
+                cy = char_loc[1] + (arrow.template_height * char_scale) / 2
+                self._log(f"開始閉迴路導航…")
 
-        # 連續導航直到箭頭消失或超時
-        arrow.guide_towards_arrow(
-            get_center_fn=lambda: (cx, cy),
-            cfg=self.cfg,
-            log_fn=self._log
-        )
+                # 連續導航直到箭頭消失或超時
+                arrow.guide_towards_arrow(
+                    get_center_fn=lambda: (cx, cy),
+                    cfg=self.cfg,
+                    log_fn=self._log
+                )
+            except Exception as e:
+                print(f"[錯誤] 導航過程異常: {e}")
+                self._log(f"導航異常: {e}")
+                return False
 
-        # 到站後再點圖標確認
-        time.sleep(self.cfg["POST_MOVE_DELAY"])
-        icon.click_center(current_location, current_scale)
-        time.sleep(self.cfg["FINAL_CHECK_DELAY"])
-        return True        
+            # 到站後再點圖標確認
+            try:
+                time.sleep(self.cfg["POST_MOVE_DELAY"])
+                icon.click_center(current_location, current_scale)
+                time.sleep(self.cfg["FINAL_CHECK_DELAY"])
+            except Exception as e:
+                print(f"[警告] 最終確認點擊失敗: {e}")
+                # 最終點擊失敗不算致命錯誤
+                
+            return True
+            
+        except Exception as e:
+            print(f"[錯誤] 箭頭會話整體異常: {e}")
+            self._log(f"箭頭會話異常: {e}")
+            return False        
 
 # ==========================
 # 半透明區域預覽遮罩
