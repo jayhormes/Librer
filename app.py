@@ -974,6 +974,116 @@ class DetectorWorker(QThread):
         self.signals.finished.emit()
 
 # ==========================
+# 半透明區域預覽遮罩
+# ==========================
+class RegionPreviewOverlay(QWidget):
+    def __init__(self, regions_list, main_window_ref=None):
+        """
+        初始化區域預覽遮罩
+        regions_list: 包含 (region_rect, title, color) 的列表
+        main_window_ref: 主視窗參考，用於DPI轉換
+        """
+        super().__init__()
+        self.regions_list = regions_list
+        self.main_window = main_window_ref
+        
+        # 設置窗口圖標
+        zeny_ico_path = resource_path("zeny.ico")
+        zeny_png_path = resource_path("zeny.png")
+        if os.path.exists(zeny_ico_path):
+            self.setWindowIcon(QIcon(zeny_ico_path))
+        elif os.path.exists(zeny_png_path):
+            self.setWindowIcon(QIcon(zeny_png_path))
+        
+        # 設定視窗屬性 - 全螢幕遮罩
+        self.setWindowFlags(
+            Qt.FramelessWindowHint |
+            Qt.WindowStaysOnTopHint |
+            Qt.Tool |
+            Qt.WindowSystemMenuHint
+        )
+        
+        # 設定透明背景
+        self.setAttribute(Qt.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WA_DeleteOnClose, True)
+        
+        # 覆蓋整個虛擬桌面（多螢幕）
+        vg = QGuiApplication.primaryScreen().virtualGeometry()
+        self.setGeometry(vg)
+        
+        # 顯示遮罩
+        self.showFullScreen()
+        self.raise_()
+        self.activateWindow()
+        self.setFocus()
+        
+        region_names = [item[1] for item in regions_list]
+        print(f"區域預覽遮罩已顯示: {', '.join(region_names)}")
+
+    def keyPressEvent(self, e):
+        # 按 ESC 關閉預覽
+        if e.key() == Qt.Key_Escape:
+            print("用戶按下 ESC 鍵，關閉預覽")
+            self.close()
+
+    def mousePressEvent(self, e):
+        # 點擊任何地方都關閉預覽
+        print("用戶點擊螢幕，關閉預覽")
+        self.close()
+
+    def paintEvent(self, e):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        
+        # 繪製半透明黑色遮罩覆蓋整個螢幕
+        painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
+        
+        # 為每個區域繪製透明區域和邊框
+        colors = [
+            QColor(0, 255, 0, 255),    # 綠色
+            QColor(255, 165, 0, 255),  # 橙色
+            QColor(0, 191, 255, 255),  # 深天藍色
+            QColor(255, 20, 147, 255), # 深粉色
+        ]
+        
+        for i, (region_rect, title, custom_color) in enumerate(self.regions_list):
+            if region_rect:
+                # 使用自定義顏色或默認顏色
+                color = custom_color if custom_color else colors[i % len(colors)]
+                
+                # 選擇區域顯示透明（清除遮罩）
+                painter.setCompositionMode(QPainter.CompositionMode_Clear)
+                painter.fillRect(region_rect, QColor(0, 0, 0, 0))
+                
+                # 恢復正常繪製模式
+                painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+                
+                # 繪製彩色邊框
+                pen = QPen(color, 4, Qt.SolidLine)
+                painter.setPen(pen)
+                painter.drawRect(region_rect)
+                
+                # 顯示區域資訊
+                painter.setPen(QPen(QColor(255, 255, 255, 255), 2))
+                painter.setFont(painter.font())
+                text = f"{title}: ({region_rect.x()}, {region_rect.y()}) {region_rect.width()}×{region_rect.height()}"
+                
+                # 在區域上方顯示文字，確保不超出螢幕邊界
+                text_pos = region_rect.topLeft() + QPoint(5, -10)
+                if text_pos.y() < 20:
+                    text_pos = region_rect.bottomLeft() + QPoint(5, 20)
+                painter.drawText(text_pos, text)
+        
+        # 在螢幕中央顯示操作提示
+        painter.setPen(QPen(QColor(255, 255, 255, 200), 2))
+        painter.setFont(painter.font())
+        hint_text = "按 ESC 鍵或點擊任意地方關閉預覽"
+        hint_rect = painter.fontMetrics().boundingRect(hint_text)
+        screen_center = self.rect().center()
+        hint_pos = QPoint(screen_center.x() - hint_rect.width() // 2, 50)
+        painter.drawText(hint_pos, hint_text)
+
+# ==========================
 # 矩形框選 Overlay
 # ==========================
 class RegionPicker(QWidget):
@@ -1177,9 +1287,12 @@ class MainWindow(QWidget):
         self.le_char_region = QLineEdit()
         b4 = QPushButton("框選『集合圖標』區域")
         b5 = QPushButton("框選『人物活動』區域")
-        b6 = QPushButton("顯示預覽")
+        b6 = QPushButton("螢幕預覽")
         b6.setMaximumWidth(80)
         b6.clicked.connect(self.show_current_region_preview)
+        b7 = QPushButton("GUI預覽")
+        b7.setMaximumWidth(80)
+        b7.clicked.connect(self.show_legacy_preview)
         b4.clicked.connect(lambda: self.pick_region(self.le_icon_region))
         b5.clicked.connect(lambda: self.pick_region(self.le_char_region))
         g3.addWidget(QLabel("集合圖標區域："), 0, 0)
@@ -1189,6 +1302,7 @@ class MainWindow(QWidget):
         g3.addWidget(self.le_char_region, 1, 1)
         g3.addWidget(b5, 1, 2)
         g3.addWidget(b6, 2, 0)
+        g3.addWidget(b7, 2, 1)
         grp_region.setLayout(g3)
 
         # --- 控制 ---
@@ -1328,6 +1442,35 @@ class MainWindow(QWidget):
             
         except Exception as e:
             self.append_log(f"DPI 轉換失敗: {e}，使用原始值")
+            return int(x), int(y), int(w), int(h)
+
+    def _device_to_logical_rect(self, x, y, w, h):
+        """把螢幕『實際像素』矩形轉成 Qt『邏輯像素』矩形（用於預覽顯示）。"""
+        try:
+            screen = QGuiApplication.screenAt(QPoint(x, y)) or QGuiApplication.primaryScreen()
+            dpr = screen.devicePixelRatio()
+            
+            # 如果 DPI 比例無效，嘗試其他方法
+            if not dpr or dpr <= 0:
+                try:
+                    dpr = screen.logicalDotsPerInchX() / 96.0
+                except Exception:
+                    dpr = 1.0
+            
+            # 在某些系統上 DPI 比例可能不需要調整
+            if dpr == 1.0:
+                return int(x), int(y), int(w), int(h)
+            
+            result_x = round(x / dpr)
+            result_y = round(y / dpr) 
+            result_w = round(w / dpr)
+            result_h = round(h / dpr)
+            
+            self.append_log(f"逆DPI 轉換: 比例={dpr:.2f}, 實際({x},{y},{w},{h}) -> 邏輯({result_x},{result_y},{result_w},{result_h})")
+            return result_x, result_y, result_w, result_h
+            
+        except Exception as e:
+            self.append_log(f"逆DPI 轉換失敗: {e}，使用原始值")
             return int(x), int(y), int(w), int(h)
 
 
@@ -1552,7 +1695,53 @@ class MainWindow(QWidget):
         QTimer.singleShot(10, self._adjust_window_size)
 
     def show_current_region_preview(self):
-        """顯示當前設定區域的預覽"""
+        """使用半透明遮罩顯示當前設定區域的預覽（支援多區域同時顯示）"""
+        icon_text = self.le_icon_region.text().strip()
+        char_text = self.le_char_region.text().strip()
+        
+        regions_to_preview = []
+        
+        # 檢查目標圖標區域
+        if icon_text and "," in icon_text:
+            try:
+                values = list(map(int, icon_text.split(",")))
+                if len(values) == 4:
+                    # 輸入框中儲存的是實際像素座標，需要轉換為邏輯像素用於Qt顯示
+                    dx, dy, dw, dh = values
+                    lx, ly, lw, lh = self._device_to_logical_rect(dx, dy, dw, dh)
+                    region_rect = QRect(lx, ly, lw, lh)
+                    regions_to_preview.append((region_rect, "目標圖標區域", QColor(0, 255, 0, 255)))  # 綠色
+                    self.append_log(f"準備預覽目標圖標區域: 實際({dx}, {dy}, {dw}, {dh}) -> 邏輯({lx}, {ly}, {lw}, {lh})")
+            except ValueError:
+                self.append_log("目標圖標區域格式錯誤，請使用 x,y,w,h 格式")
+        
+        # 檢查人物/箭頭區域
+        if char_text and "," in char_text:
+            try:
+                values = list(map(int, char_text.split(",")))
+                if len(values) == 4:
+                    # 輸入框中儲存的是實際像素座標，需要轉換為邏輯像素用於Qt顯示
+                    dx, dy, dw, dh = values
+                    lx, ly, lw, lh = self._device_to_logical_rect(dx, dy, dw, dh)
+                    region_rect = QRect(lx, ly, lw, lh)
+                    regions_to_preview.append((region_rect, "人物/箭頭區域", QColor(255, 165, 0, 255)))  # 橙色
+                    self.append_log(f"準備預覽人物/箭頭區域: 實際({dx}, {dy}, {dw}, {dh}) -> 邏輯({lx}, {ly}, {lw}, {lh})")
+            except ValueError:
+                self.append_log("人物/箭頭區域格式錯誤，請使用 x,y,w,h 格式")
+        
+        if regions_to_preview:
+            try:
+                self.preview_overlay = RegionPreviewOverlay(regions_to_preview, self)
+                region_names = [item[1] for item in regions_to_preview]
+                self.append_log(f"半透明預覽遮罩已顯示: {', '.join(region_names)}，按 ESC 或點擊任意地方關閉")
+            except Exception as e:
+                self.append_log(f"預覽遮罩顯示失敗: {e}")
+        else:
+            self.append_log("請先設定目標圖標區域或人物/箭頭區域後再預覽")
+            QMessageBox.information(self, "提示", "請先設定目標圖標區域或人物/箭頭區域後再預覽")
+
+    def show_legacy_preview(self):
+        """顯示傳統的 GUI 預覽（保留原功能）"""
         # 顯示預覽區域
         self.preview_header_widget.show()
         self.preview_label.show()
