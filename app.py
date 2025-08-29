@@ -1300,18 +1300,66 @@ class MainWindow(QWidget):
         
         # 控制按鈕佈局
         control_layout = QHBoxLayout()
-        self.btn_start = QPushButton("Start")
-        self.btn_pause = QPushButton("Pause")
-        self.btn_resume = QPushButton("Resume")
-        self.btn_stop = QPushButton("Stop")
+        self.btn_start = QPushButton("▶ 開始")
+        self.btn_stop = QPushButton("⏹ 停止")
+        
+        # 設定按鈕樣式和大小
+        button_style = """
+            QPushButton {
+                font-size: 14px;
+                font-weight: bold;
+                padding: 8px 16px;
+                border-radius: 6px;
+                border: 2px solid;
+                min-width: 80px;
+            }
+        """
+        
+        start_style = button_style + """
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                border-color: #45a049;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #3d8b40;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+                border-color: #999999;
+            }
+        """
+        
+        stop_style = button_style + """
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border-color: #da190b;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+            QPushButton:pressed {
+                background-color: #c1160a;
+            }
+            QPushButton:disabled {
+                background-color: #cccccc;
+                color: #666666;
+                border-color: #999999;
+            }
+        """
+        
+        self.btn_start.setStyleSheet(start_style)
+        self.btn_stop.setStyleSheet(stop_style)
+        
         self.btn_start.clicked.connect(self.on_start)
-        self.btn_pause.clicked.connect(self.on_pause)
-        self.btn_resume.clicked.connect(self.on_resume)
         self.btn_stop.clicked.connect(self.on_stop)
         
         control_layout.addWidget(self.btn_start)
-        control_layout.addWidget(self.btn_pause)
-        control_layout.addWidget(self.btn_resume)
         control_layout.addWidget(self.btn_stop)
         
         # 添加分隔線和設定按鈕
@@ -1551,20 +1599,17 @@ class MainWindow(QWidget):
 
     def update_button_status(self, status):
         """
-        status: "running", "paused", "stopped"
+        status: "running", "stopped"
         """
-        default_style = ""
-        self.btn_start.setStyleSheet(default_style)
-        self.btn_pause.setStyleSheet(default_style)
-        self.btn_resume.setStyleSheet(default_style)
-        self.btn_stop.setStyleSheet(default_style)
-        
         if status == "running":
-            self.btn_start.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        elif status == "paused":
-            self.btn_pause.setStyleSheet("background-color: #FF9800; color: white; font-weight: bold;")
+            self.btn_start.setEnabled(False)
+            self.btn_stop.setEnabled(True)
+            self.btn_start.setText("▶ 運行中...")
         elif status == "stopped":
-            self.btn_stop.setStyleSheet("background-color: #F44336; color: white; font-weight: bold;")
+            self.btn_start.setEnabled(True)
+            self.btn_stop.setEnabled(False)
+            self.btn_start.setText("▶ 開始")
+            self.btn_stop.setText("⏹ 停止")
 
     def on_start(self):
         self._ui_to_cfg(); save_cfg(self.cfg)
@@ -1578,18 +1623,6 @@ class MainWindow(QWidget):
         self.worker.start()
         self.append_log("[Worker 啟動]")
         self.update_button_status("running")
-
-    def on_pause(self):
-        if self.worker and self.worker.isRunning():
-            self.worker.pause()
-            self.append_log("[暫停]")
-            self.update_button_status("paused")
-
-    def on_resume(self):
-        if self.worker and self.worker.isRunning():
-            self.worker.resume()
-            self.append_log("[恢復]")
-            self.update_button_status("running")
 
     def on_stop(self):
         if self.worker and self.worker.isRunning():
