@@ -63,6 +63,14 @@ DEFAULT_CFG = {
     "DRAG_HOLD_SECONDS": 0.2,
     "DRAG_BUTTON": "left",
 
+    # 點擊參數
+    "CLICK_RANDOM_OFFSET_X": 10,     # 隨機偏移X像素範圍
+    "CLICK_RANDOM_OFFSET_Y": 10,     # 隨機偏移Y像素範圍
+    "CLICK_COUNT_MIN": 2,            # 最少點擊次數
+    "CLICK_COUNT_MAX": 4,            # 最多點擊次數
+    "CLICK_INTERVAL_MIN": 0.08,      # 最短點擊間隔(秒)
+    "CLICK_INTERVAL_MAX": 0.25,      # 最長點擊間隔(秒)
+
     # 主流程
     "MAX_ARROW_ATTEMPTS": 6,
     "MAIN_SEARCH_INTERVAL": 0.6,
@@ -289,6 +297,54 @@ class ConfigDialog(QDialog):
         self.drag_hold_spin.setValue(self.cfg["DRAG_HOLD_SECONDS"])
         movement_layout.addRow("拖曳持續時間(秒):", self.drag_hold_spin)
         
+        # 點擊隨機偏移X
+        self.click_offset_x_spin = QSpinBox()
+        self.click_offset_x_spin.setRange(0, 50)
+        self.click_offset_x_spin.setValue(self.cfg["CLICK_RANDOM_OFFSET_X"])
+        movement_layout.addRow("點擊隨機偏移X(像素):", self.click_offset_x_spin)
+        
+        # 點擊隨機偏移Y
+        self.click_offset_y_spin = QSpinBox()
+        self.click_offset_y_spin.setRange(0, 50)
+        self.click_offset_y_spin.setValue(self.cfg["CLICK_RANDOM_OFFSET_Y"])
+        movement_layout.addRow("點擊隨機偏移Y(像素):", self.click_offset_y_spin)
+        
+        # 點擊次數範圍
+        self.click_count_min_spin = QSpinBox()
+        self.click_count_min_spin.setRange(1, 10)
+        self.click_count_min_spin.setValue(self.cfg["CLICK_COUNT_MIN"])
+        
+        self.click_count_max_spin = QSpinBox()
+        self.click_count_max_spin.setRange(1, 10)
+        self.click_count_max_spin.setValue(self.cfg["CLICK_COUNT_MAX"])
+        
+        click_count_layout = QHBoxLayout()
+        click_count_layout.addWidget(QLabel("最少:"))
+        click_count_layout.addWidget(self.click_count_min_spin)
+        click_count_layout.addWidget(QLabel("最多:"))
+        click_count_layout.addWidget(self.click_count_max_spin)
+        movement_layout.addRow("點擊次數範圍:", click_count_layout)
+        
+        # 點擊間隔範圍
+        self.click_interval_min_spin = QDoubleSpinBox()
+        self.click_interval_min_spin.setRange(0.01, 1.0)
+        self.click_interval_min_spin.setSingleStep(0.01)
+        self.click_interval_min_spin.setDecimals(3)
+        self.click_interval_min_spin.setValue(self.cfg["CLICK_INTERVAL_MIN"])
+        
+        self.click_interval_max_spin = QDoubleSpinBox()
+        self.click_interval_max_spin.setRange(0.01, 1.0)
+        self.click_interval_max_spin.setSingleStep(0.01)
+        self.click_interval_max_spin.setDecimals(3)
+        self.click_interval_max_spin.setValue(self.cfg["CLICK_INTERVAL_MAX"])
+        
+        click_interval_layout = QHBoxLayout()
+        click_interval_layout.addWidget(QLabel("最短:"))
+        click_interval_layout.addWidget(self.click_interval_min_spin)
+        click_interval_layout.addWidget(QLabel("最長:"))
+        click_interval_layout.addWidget(self.click_interval_max_spin)
+        movement_layout.addRow("點擊間隔範圍(秒):", click_interval_layout)
+        
         tabs.addTab(movement_tab, "移動控制")
         
         # 時間控制標籤頁
@@ -388,6 +444,14 @@ class ConfigDialog(QDialog):
         self.drag_distance_slider.setValue(DEFAULT_CFG["DRAG_DISTANCE"])
         self.drag_hold_spin.setValue(DEFAULT_CFG["DRAG_HOLD_SECONDS"])
         
+        # 點擊設置
+        self.click_offset_x_spin.setValue(DEFAULT_CFG["CLICK_RANDOM_OFFSET_X"])
+        self.click_offset_y_spin.setValue(DEFAULT_CFG["CLICK_RANDOM_OFFSET_Y"])
+        self.click_count_min_spin.setValue(DEFAULT_CFG["CLICK_COUNT_MIN"])
+        self.click_count_max_spin.setValue(DEFAULT_CFG["CLICK_COUNT_MAX"])
+        self.click_interval_min_spin.setValue(DEFAULT_CFG["CLICK_INTERVAL_MIN"])
+        self.click_interval_max_spin.setValue(DEFAULT_CFG["CLICK_INTERVAL_MAX"])
+        
         # 時間控制
         self.main_interval_spin.setValue(DEFAULT_CFG["MAIN_SEARCH_INTERVAL"])
         self.arrow_interval_spin.setValue(DEFAULT_CFG["ARROW_SEARCH_INTERVAL"])
@@ -411,6 +475,14 @@ class ConfigDialog(QDialog):
         
         self.cfg["DRAG_DISTANCE"] = self.drag_distance_slider.value()
         self.cfg["DRAG_HOLD_SECONDS"] = self.drag_hold_spin.value()
+        
+        # 點擊設置
+        self.cfg["CLICK_RANDOM_OFFSET_X"] = self.click_offset_x_spin.value()
+        self.cfg["CLICK_RANDOM_OFFSET_Y"] = self.click_offset_y_spin.value()
+        self.cfg["CLICK_COUNT_MIN"] = self.click_count_min_spin.value()
+        self.cfg["CLICK_COUNT_MAX"] = self.click_count_max_spin.value()
+        self.cfg["CLICK_INTERVAL_MIN"] = self.click_interval_min_spin.value()
+        self.cfg["CLICK_INTERVAL_MAX"] = self.click_interval_max_spin.value()
         
         self.cfg["MAIN_SEARCH_INTERVAL"] = self.main_interval_spin.value()
         self.cfg["ARROW_SEARCH_INTERVAL"] = self.arrow_interval_spin.value()
@@ -470,15 +542,40 @@ class ImageDetector:
             return center_x, center_y
         return None, None
 
-    def click_center(self, location, scale):
+    def click_center(self, location, scale, cfg=None):
+        """點擊目標中心位置，支持可配置的隨機偏移和多次點擊"""
         cx, cy = self.get_center_position(location, scale)
         if cx and cy:
-            offx = random.randint(-10, 10)
-            offy = random.randint(-10, 10)
+            # 使用傳入的配置或預設值
+            if cfg is None:
+                cfg = {
+                    "CLICK_RANDOM_OFFSET_X": 10,
+                    "CLICK_RANDOM_OFFSET_Y": 10,
+                    "CLICK_COUNT_MIN": 2,
+                    "CLICK_COUNT_MAX": 4,
+                    "CLICK_INTERVAL_MIN": 0.08,
+                    "CLICK_INTERVAL_MAX": 0.25
+                }
+            
+            # 隨機決定點擊次數
+            click_count = random.randint(cfg["CLICK_COUNT_MIN"], cfg["CLICK_COUNT_MAX"])
             sw, sh = pyautogui.size()
-            click_x = max(0, min(sw - 1, cx + offx))
-            click_y = max(0, min(sh - 1, cy + offy))
-            pyautogui.click(click_x, click_y)
+            
+            for i in range(click_count):
+                # 每次點擊都重新計算隨機偏移
+                offx = random.randint(-cfg["CLICK_RANDOM_OFFSET_X"], cfg["CLICK_RANDOM_OFFSET_X"])
+                offy = random.randint(-cfg["CLICK_RANDOM_OFFSET_Y"], cfg["CLICK_RANDOM_OFFSET_Y"])
+                
+                click_x = max(0, min(sw - 1, cx + offx))
+                click_y = max(0, min(sh - 1, cy + offy))
+                
+                pyautogui.click(click_x, click_y)
+                
+                # 如果不是最後一次點擊，則等待隨機間隔
+                if i < click_count - 1:
+                    interval = random.uniform(cfg["CLICK_INTERVAL_MIN"], cfg["CLICK_INTERVAL_MAX"])
+                    time.sleep(interval)
+            
             return True
         return False
 
@@ -838,7 +935,7 @@ class DetectorWorker(QThread):
                         break
 
                     self._log(f"[箭頭偵測 {attempts+1}] 點擊圖標(預防性)")
-                    icon.click_center(current_location, current_scale)
+                    icon.click_center(current_location, current_scale, self.cfg)
                     time.sleep(self.cfg["PREVENTIVE_CLICK_DELAY"])
 
                     # 找人物
@@ -853,7 +950,7 @@ class DetectorWorker(QThread):
                             arrow.drag_towards_arrow(cx, cy, best_angle)
                             time.sleep(self.cfg["POST_MOVE_DELAY"])
                             self._log("移動後再次點圖標")
-                            icon.click_center(current_location, current_scale)
+                            icon.click_center(current_location, current_scale, self.cfg)
                             time.sleep(self.cfg["FINAL_CHECK_DELAY"])
                         else:
                             self._log("未穩定偵測到箭頭")
