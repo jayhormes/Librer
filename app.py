@@ -1225,12 +1225,6 @@ class MainWindow(QWidget):
         self.cfg = load_cfg()
         self.worker = None
         self._picker = None 
-        self.preview_label = QLabel()       # 預覽縮圖區
-        self.preview_label.setMinimumHeight(160)
-        self.preview_label.setAlignment(Qt.AlignCenter)
-        self.preview_label.setStyleSheet("border: 1px dashed #888; color:#888;")
-        self.preview_label.setText("（框選完成後顯示預覽）")
-        self.preview_label.hide()  # 初始時隱藏
         self._build_ui()
         self._load_cfg_to_ui()
 
@@ -1290,9 +1284,6 @@ class MainWindow(QWidget):
         b6 = QPushButton("螢幕預覽")
         b6.setMaximumWidth(80)
         b6.clicked.connect(self.show_current_region_preview)
-        b7 = QPushButton("GUI預覽")
-        b7.setMaximumWidth(80)
-        b7.clicked.connect(self.show_legacy_preview)
         b4.clicked.connect(lambda: self.pick_region(self.le_icon_region))
         b5.clicked.connect(lambda: self.pick_region(self.le_char_region))
         g3.addWidget(QLabel("集合圖標區域："), 0, 0)
@@ -1302,7 +1293,6 @@ class MainWindow(QWidget):
         g3.addWidget(self.le_char_region, 1, 1)
         g3.addWidget(b5, 1, 2)
         g3.addWidget(b6, 2, 0)
-        g3.addWidget(b7, 2, 1)
         grp_region.setLayout(g3)
 
         # --- 控制 ---
@@ -1378,24 +1368,6 @@ class MainWindow(QWidget):
         layout.addWidget(grp_ctrl)
         layout.addWidget(QLabel("Log"))
         layout.addWidget(self.log)
-        
-        # 預覽區域標題欄（包含隱藏按鈕）
-        preview_header = QHBoxLayout()
-        self.preview_title_label = QLabel("區域預覽")
-        self.preview_hide_btn = QPushButton("隱藏預覽")
-        self.preview_hide_btn.setMaximumWidth(80)
-        self.preview_hide_btn.clicked.connect(self.hide_preview)
-        preview_header.addWidget(self.preview_title_label)
-        preview_header.addStretch()
-        preview_header.addWidget(self.preview_hide_btn)
-        
-        preview_header_widget = QWidget()
-        preview_header_widget.setLayout(preview_header)
-        self.preview_header_widget = preview_header_widget
-        self.preview_header_widget.hide()
-        
-        layout.addWidget(self.preview_header_widget)
-        layout.addWidget(self.preview_label)
 
         # Save on close
         self.setLayout(layout)
@@ -1512,15 +1484,6 @@ class MainWindow(QWidget):
             self._picker = None
 
         self.append_log("開始框選區域，請在螢幕上拖拽選擇區域...")
-        
-        # 顯示預覽區域
-        self.preview_header_widget.show()
-        self.preview_label.show()
-        self.preview_label.setText("正在等待框選...")
-        
-        # 自動調整視窗大小以容納預覽區域
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(10, self._adjust_window_size)
         
         # 暫時隱藏主視窗，避免干擾框選
         self.setWindowState(Qt.WindowState.WindowMinimized)
@@ -1663,36 +1626,10 @@ class MainWindow(QWidget):
         # 寫回輸入框：以『實際像素』為準
         lineedit.setText(f"{dx},{dy},{dw},{dh}")
 
-        # 在 GUI 顯示縮圖預覽
-        try:
-            self.append_log(f"正在截取預覽: region=({dx}, {dy}, {dw}, {dh})")
-            img = pyautogui.screenshot(region=(dx, dy, dw, dh)).convert("RGB")
-            qimg = QImage(img.tobytes("raw", "RGB"), img.width, img.height, QImage.Format_RGB888)
-            # 依 Label 大小縮放顯示
-            if self.preview_label.width() > 0 and self.preview_label.height() > 0:
-                pix = QPixmap.fromImage(qimg).scaled(
-                    self.preview_label.width(), self.preview_label.height(),
-                    Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-            else:
-                pix = QPixmap.fromImage(qimg).scaledToWidth(360, Qt.SmoothTransformation)
-            self.preview_label.setPixmap(pix)
-            self.append_log("預覽圖片已更新")
-        except Exception as e:
-            self.append_log(f"[預覽失敗] {e}")
+        self.append_log("區域選擇完成")
 
         # 釋放 overlay 參考
         self._picker = None
-
-    def hide_preview(self):
-        """隱藏預覽區域"""
-        self.preview_header_widget.hide()
-        self.preview_label.hide()
-        self.append_log("預覽區域已隱藏")
-        
-        # 使用定時器延遲調整視窗大小，確保佈局更新完成
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(10, self._adjust_window_size)
 
     def show_current_region_preview(self):
         """使用半透明遮罩顯示當前設定區域的預覽（支援多區域同時顯示）"""
@@ -1739,63 +1676,6 @@ class MainWindow(QWidget):
         else:
             self.append_log("請先設定目標圖標區域或人物/箭頭區域後再預覽")
             QMessageBox.information(self, "提示", "請先設定目標圖標區域或人物/箭頭區域後再預覽")
-
-    def show_legacy_preview(self):
-        """顯示傳統的 GUI 預覽（保留原功能）"""
-        # 顯示預覽區域
-        self.preview_header_widget.show()
-        self.preview_label.show()
-        
-        # 自動調整視窗大小以容納預覽區域
-        from PySide6.QtCore import QTimer
-        QTimer.singleShot(10, self._adjust_window_size)
-        
-        # 嘗試預覽目標圖標區域（如果有設定的話）
-        icon_text = self.le_icon_region.text().strip()
-        char_text = self.le_char_region.text().strip()
-        
-        preview_region = None
-        preview_name = ""
-        
-        if icon_text and "," in icon_text:
-            try:
-                values = list(map(int, icon_text.split(",")))
-                if len(values) == 4:
-                    preview_region = values
-                    preview_name = "目標圖標區域"
-            except ValueError:
-                pass
-        
-        if not preview_region and char_text and "," in char_text:
-            try:
-                values = list(map(int, char_text.split(",")))
-                if len(values) == 4:
-                    preview_region = values
-                    preview_name = "人物/箭頭區域"
-            except ValueError:
-                pass
-        
-        if preview_region:
-            try:
-                dx, dy, dw, dh = preview_region
-                self.append_log(f"顯示 {preview_name} 預覽: ({dx}, {dy}, {dw}, {dh})")
-                img = pyautogui.screenshot(region=(dx, dy, dw, dh)).convert("RGB")
-                qimg = QImage(img.tobytes("raw", "RGB"), img.width, img.height, QImage.Format_RGB888)
-                if self.preview_label.width() > 0 and self.preview_label.height() > 0:
-                    pix = QPixmap.fromImage(qimg).scaled(
-                        self.preview_label.width(), self.preview_label.height(),
-                        Qt.KeepAspectRatio, Qt.SmoothTransformation
-                    )
-                else:
-                    pix = QPixmap.fromImage(qimg).scaledToWidth(360, Qt.SmoothTransformation)
-                self.preview_label.setPixmap(pix)
-                self.append_log(f"{preview_name} 預覽已更新")
-            except Exception as e:
-                self.preview_label.setText(f"預覽失敗: {e}")
-                self.append_log(f"預覽失敗: {e}")
-        else:
-            self.preview_label.setText("請先設定區域座標")
-            self.append_log("沒有有效的區域座標可以預覽")
 
     def _adjust_window_size(self):
         """調整視窗大小以適應內容"""
