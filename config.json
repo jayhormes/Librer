@@ -4,8 +4,8 @@
   "WINDOW_POSITION_Y": 0,
   "WINDOW_WIDTH": 1080,
   "WINDOW_HEIGHT": 1620,
-  "TARGET_IMAGE_PATH": "target.png",
-  "CHARACTER_IMAGE_PATH": "character.png",
+  "TARGET_IMAGE_PATH": "images/target.png",
+  "CHARACTER_IMAGE_PATH": "images/character.png",
   "CHARACTER_SEARCH_REGION": [
     300,
     774,
@@ -30,7 +30,7 @@
     1.05
   ],
   "ICON_SCALE_STEPS": 10,
-  "ARROW_IMAGE_PATH": "arrow.png",
+  "ARROW_IMAGE_PATH": "images/arrow.png",
   "ARROW_SEARCH_RADIUS": 100,
   "ARROW_MIN_AREA": 300,
   "ARROW_DETECTION_TIMEOUT": 3.0,

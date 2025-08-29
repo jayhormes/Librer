@@ -1419,14 +1419,14 @@ class DetectorWorker(QThread):
     def run(self):
         try:
             icon = ImageDetector(
-                template_path=self.cfg["TARGET_IMAGE_PATH"],
+                template_path=resource_path(self.cfg["TARGET_IMAGE_PATH"]),
                 search_region=self.cfg["ICON_SEARCH_REGION"],
                 confidence=self.cfg["ICON_CONFIDENCE"],
                 scale_steps=self.cfg["ICON_SCALE_STEPS"],
                 scale_range=tuple(self.cfg["ICON_SCALE_RANGE"])
             )
             arrow = ArrowDetector(
-                character_template_path=self.cfg["CHARACTER_IMAGE_PATH"],
+                character_template_path=resource_path(self.cfg["CHARACTER_IMAGE_PATH"]),
                 search_region=self.cfg["CHARACTER_SEARCH_REGION"],
                 arrow_search_radius=self.cfg["ARROW_SEARCH_RADIUS"],
                 min_area=self.cfg["ARROW_MIN_AREA"],
