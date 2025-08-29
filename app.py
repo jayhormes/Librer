@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QRect, QPoint, Signal, QObject, QThread
 from PySide6.QtWidgets import (
     QApplication, QWidget, QLabel, QLineEdit, QPushButton, QFileDialog,
     QGridLayout, QGroupBox, QTextEdit, QHBoxLayout, QVBoxLayout, QMessageBox,
-    QSizePolicy, QDialog, QSlider, QSpinBox, QDoubleSpinBox, QFormLayout, QTabWidget, QComboBox
+    QSizePolicy, QDialog, QSlider, QSpinBox, QDoubleSpinBox, QFormLayout, QTabWidget, QComboBox, QCheckBox
 )
 from PySide6.QtGui import QPainter, QPen, QColor, QGuiApplication, QImage, QPixmap, QIcon
 
@@ -93,6 +93,10 @@ DEFAULT_CFG = {
     "ARROW_MISS_TOLERANCE_TIME": 0.5, # 容忍箭頭消失時間（秒）
     "DIRECTION_CHANGE_THRESHOLD": 3,  # 方向改變確認次數
 
+    # 視窗聚焦功能
+    "ENABLE_WINDOW_FOCUS": True,        # 是否啟用視窗聚焦功能
+    "WINDOW_FOCUS_ON_DETECTION": True,  # 在偵測到圖標時聚焦視窗
+    
     # 主流程
     "MAX_ARROW_ATTEMPTS": 6,
     "MAIN_SEARCH_INTERVAL": 0.6,
@@ -139,6 +143,85 @@ def clamp_region_to_screen(x, y, w, h):
     w = int(round(max(1, min(w, sw - x))))
     h = int(round(max(1, min(h, sh - y))))
     return x, y, w, h
+
+# ==========================
+# 視窗管理功能
+# ==========================
+class WindowManager:
+    def __init__(self, title_keyword=""):
+        self.title_keyword = title_keyword
+        self.target_window = None
+        self.window_status = "unknown"  # unknown, found, not_found
+        
+    def update_keyword(self, keyword):
+        """更新目標視窗關鍵字"""
+        self.title_keyword = keyword
+        self.target_window = None
+        self.window_status = "unknown"
+    
+    def find_target_window(self):
+        """尋找目標視窗"""
+        if not self.title_keyword:
+            self.window_status = "not_found"
+            return None
+            
+        try:
+            # 使用 pygetwindow 尋找包含關鍵字的視窗
+            windows = gw.getWindowsWithTitle(self.title_keyword)
+            if windows:
+                # 找到第一個匹配的視窗
+                self.target_window = windows[0]
+                self.window_status = "found"
+                return self.target_window
+            else:
+                # 如果完全匹配失敗，嘗試模糊搜尋
+                all_windows = gw.getAllWindows()
+                for window in all_windows:
+                    if self.title_keyword.lower() in window.title.lower():
+                        self.target_window = window
+                        self.window_status = "found"
+                        return self.target_window
+                        
+                self.window_status = "not_found"
+                self.target_window = None
+                return None
+        except Exception as e:
+            print(f"尋找視窗時發生錯誤: {e}")
+            self.window_status = "not_found"
+            self.target_window = None
+            return None
+    
+    def focus_window(self):
+        """聚焦目標視窗"""
+        if not self.target_window:
+            window = self.find_target_window()
+            if not window:
+                return False
+                
+        try:
+            # 嘗試聚焦視窗
+            if hasattr(self.target_window, 'activate'):
+                self.target_window.activate()
+            elif hasattr(self.target_window, 'restore'):
+                self.target_window.restore()
+                
+            # 確保視窗在前景
+            if hasattr(self.target_window, 'minimize') and self.target_window.isMinimized:
+                self.target_window.restore()
+                
+            return True
+        except Exception as e:
+            print(f"聚焦視窗時發生錯誤: {e}")
+            return False
+    
+    def get_window_status(self):
+        """獲取視窗狀態"""
+        return self.window_status
+    
+    def refresh_window_status(self):
+        """刷新視窗狀態"""
+        self.find_target_window()
+        return self.window_status
 
 # ==========================
 # 配置設定對話框
@@ -480,6 +563,24 @@ class ConfigDialog(QDialog):
         advanced_tab = QWidget()
         advanced_layout = QFormLayout(advanced_tab)
         
+        # 視窗聚焦設定區塊
+        focus_label = QLabel("視窗聚焦設定:")
+        focus_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        advanced_layout.addRow(focus_label)
+        
+        # 啟用視窗聚焦功能
+        self.enable_window_focus_checkbox = QCheckBox("啟用視窗聚焦功能")
+        self.enable_window_focus_checkbox.setChecked(self.cfg["ENABLE_WINDOW_FOCUS"])
+        advanced_layout.addRow("", self.enable_window_focus_checkbox)
+        
+        # 偵測時聚焦視窗
+        self.window_focus_on_detection_checkbox = QCheckBox("偵測到圖標時自動聚焦目標視窗")
+        self.window_focus_on_detection_checkbox.setChecked(self.cfg["WINDOW_FOCUS_ON_DETECTION"])
+        advanced_layout.addRow("", self.window_focus_on_detection_checkbox)
+        
+        # 分隔線
+        advanced_layout.addRow("", QLabel())
+        
         # 箭頭輪詢間隔
         self.arrow_poll_interval_spin = QDoubleSpinBox()
         self.arrow_poll_interval_spin.setRange(0.01, 0.5)
@@ -663,6 +764,10 @@ class ConfigDialog(QDialog):
         self.post_move_delay_spin.setValue(DEFAULT_CFG["POST_MOVE_DELAY"])
         self.final_check_delay_spin.setValue(DEFAULT_CFG["FINAL_CHECK_DELAY"])
         
+        # 視窗聚焦設定
+        self.enable_window_focus_checkbox.setChecked(DEFAULT_CFG["ENABLE_WINDOW_FOCUS"])
+        self.window_focus_on_detection_checkbox.setChecked(DEFAULT_CFG["WINDOW_FOCUS_ON_DETECTION"])
+        
     def get_config(self):
         """返回更新後的配置"""
         self.cfg["ICON_CONFIDENCE"] = self.icon_confidence_slider.value() / 100.0
@@ -709,6 +814,8 @@ class ConfigDialog(QDialog):
         self.cfg["DIRECTION_CHANGE_THRESHOLD"] = self.direction_change_threshold_spin.value()
         
         # 高級設定
+        self.cfg["ENABLE_WINDOW_FOCUS"] = self.enable_window_focus_checkbox.isChecked()
+        self.cfg["WINDOW_FOCUS_ON_DETECTION"] = self.window_focus_on_detection_checkbox.isChecked()
         self.cfg["ARROW_POLL_INTERVAL"] = self.arrow_poll_interval_spin.value()
         self.cfg["DRAG_BUTTON"] = self.drag_button_combo.text()
         self.cfg["DRAG_SESSION_MAX"] = self.drag_session_max_spin.value()
@@ -1395,9 +1502,10 @@ class WorkerSignals(QObject):
     finished = Signal()
 
 class DetectorWorker(QThread):
-    def __init__(self, cfg):
+    def __init__(self, cfg, main_window_ref=None):
         super().__init__()
         self.cfg = cfg
+        self.main_window = main_window_ref
         self.signals = WorkerSignals()
         self._pause_ev = threading.Event()
         self._stop_ev = threading.Event()
@@ -1504,6 +1612,19 @@ class DetectorWorker(QThread):
             else:
                 if last_status != "searching":
                     self._log(f"[{time.strftime('%H:%M:%S')}] 搜尋目標圖標中…")
+                    
+                    # 在開始搜尋之前先嘗試聚焦目標視窗
+                    if (self.cfg.get("ENABLE_WINDOW_FOCUS", False) and 
+                        self.cfg.get("WINDOW_FOCUS_ON_DETECTION", False) and 
+                        self.main_window):
+                        try:
+                            if self.main_window.focus_target_window():
+                                self._log("[視窗聚焦] 已將目標視窗設為前景，開始搜尋")
+                            else:
+                                self._log("[視窗聚焦] 無法聚焦目標視窗，繼續搜尋")
+                        except Exception as e:
+                            self._log(f"[視窗聚焦錯誤] {e}")
+                    
                     last_status = "searching"
                     search_t0 = time.time()
                     icon_lost_logged = False  # 重置標記
@@ -1805,8 +1926,15 @@ class MainWindow(QWidget):
         self.cfg = load_cfg()
         self.worker = None
         self._picker = None 
+        
+        # 初始化視窗管理器
+        self.window_manager = WindowManager(self.cfg.get("TARGET_TITLE_KEYWORD", ""))
+        
         self._build_ui()
         self._load_cfg_to_ui()
+        
+        # 初始化視窗狀態
+        self.refresh_window_status()
 
     def _create_vertical_line(self):
         """創建垂直分隔線"""
@@ -1823,6 +1951,9 @@ class MainWindow(QWidget):
         grp_win = QGroupBox("目標視窗")
         g1 = QGridLayout()
         self.le_title = QLineEdit()
+        # 當關鍵字改變時，更新視窗狀態
+        self.le_title.textChanged.connect(self.on_title_keyword_changed)
+        
         btn_resize = QPushButton("一鍵定位/調整大小")
         btn_resize.clicked.connect(self.on_resize_window)
         
@@ -1839,8 +1970,19 @@ class MainWindow(QWidget):
         self.le_win_height.setMaximumWidth(80)
         
         g1.addWidget(QLabel("視窗標題關鍵字："), 0, 0)
-        g1.addWidget(self.le_title, 0, 1, 1, 2)
-        g1.addWidget(btn_resize, 0, 3)
+        g1.addWidget(self.le_title, 0, 1, 1, 3)  # 增長輸入框佔用3個網格單位
+        
+        # 添加視窗狀態指示器
+        self.window_status_label = QLabel("⬛")
+        self.window_status_label.setStyleSheet("font-size: 14px; font-weight: bold; padding: 1px;")
+        self.window_status_label.setToolTip("視窗狀態：未知")
+        self.window_status_label.setFixedSize(20, 20)
+        self.window_status_label.setAlignment(Qt.AlignCenter)
+        
+        btn_resize.clicked.connect(self.on_resize_window)
+        
+        g1.addWidget(btn_resize, 0, 4)
+        g1.addWidget(self.window_status_label, 0, 5)  # 將狀態圖示放在按鈕右邊
         
         g1.addWidget(QLabel("視窗位置 X："), 1, 0)
         g1.addWidget(self.le_win_x, 1, 1)
@@ -2177,6 +2319,60 @@ class MainWindow(QWidget):
         except Exception as e:
             self.append_log(f"[調整視窗失敗] {e}")
 
+    def refresh_window_status(self):
+        """重新整理視窗狀態"""
+        if not self.cfg.get("ENABLE_WINDOW_FOCUS", False):
+            self.window_status_label.setText("⚪")
+            self.window_status_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+            self.window_status_label.setToolTip("視窗聚焦功能已停用")
+            return
+            
+        # 更新視窗管理器的關鍵字
+        keyword = self.le_title.text().strip()
+        self.window_manager.update_keyword(keyword)
+        
+        # 檢查視窗狀態
+        status = self.window_manager.refresh_window_status()
+        
+        if status == "found":
+            self.window_status_label.setText("🟩")
+            self.window_status_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+            self.window_status_label.setToolTip(f"已找到目標視窗：{self.window_manager.target_window.title if self.window_manager.target_window else ''}")
+            self.append_log(f"[視窗狀態] 已找到目標視窗")
+        elif status == "not_found":
+            self.window_status_label.setText("🟥")
+            self.window_status_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+            self.window_status_label.setToolTip(f"未找到包含關鍵字 '{keyword}' 的視窗")
+            self.append_log(f"[視窗狀態] 未找到目標視窗")
+        else:
+            self.window_status_label.setText("⬛")
+            self.window_status_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+            self.window_status_label.setToolTip("視窗狀態：未知")
+
+    def on_title_keyword_changed(self):
+        """當目標視窗關鍵字改變時的處理"""
+        # 延遲更新狀態，避免在快速打字時頻繁更新
+        if hasattr(self, '_title_update_timer'):
+            self._title_update_timer.stop()
+        
+        from PySide6.QtCore import QTimer
+        self._title_update_timer = QTimer()
+        self._title_update_timer.setSingleShot(True)
+        self._title_update_timer.timeout.connect(self.refresh_window_status)
+        self._title_update_timer.start(500)  # 500ms 延遲
+
+    def focus_target_window(self):
+        """聚焦目標視窗"""
+        if not self.cfg.get("ENABLE_WINDOW_FOCUS", False):
+            return False
+            
+        if self.window_manager.focus_window():
+            self.append_log("[視窗聚焦] 成功聚焦目標視窗")
+            return True
+        else:
+            self.append_log("[視窗聚焦] 無法聚焦目標視窗")
+            return False
+
     def update_button_status(self, status):
         """
         status: "running", "stopped"
@@ -2193,10 +2389,14 @@ class MainWindow(QWidget):
 
     def on_start(self):
         self._ui_to_cfg(); save_cfg(self.cfg)
+        
+        # 更新視窗管理器的關鍵字
+        self.window_manager.update_keyword(self.cfg["TARGET_TITLE_KEYWORD"])
+        
         if self.worker and self.worker.isRunning():
             QMessageBox.information(self, "提示", "已在執行中")
             return
-        self.worker = DetectorWorker(self.cfg)
+        self.worker = DetectorWorker(self.cfg, self)  # 傳遞自己的參考
         self.worker.signals.log.connect(self.append_log)
         self.worker.signals.finished.connect(lambda: self.append_log("[Worker 結束]"))
         self.worker.signals.finished.connect(lambda: self.update_button_status("stopped"))
@@ -2221,6 +2421,9 @@ class MainWindow(QWidget):
                 # 保存配置到文件
                 save_cfg(self.cfg)
                 self.append_log("[設定] 參數設定已更新並儲存")
+                
+                # 更新視窗狀態
+                self.refresh_window_status()
             else:
                 self.append_log("[設定] 取消參數設定")
         except Exception as e:
