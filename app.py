@@ -71,6 +71,23 @@ DEFAULT_CFG = {
     "CLICK_INTERVAL_MIN": 0.08,      # 最短點擊間隔(秒)
     "CLICK_INTERVAL_MAX": 0.25,      # 最長點擊間隔(秒)
 
+    # 連續導航/穩定性
+    "DRAG_STEP_PIXELS": 60,         # 每次小步前進距離（像素）
+    "DRAG_MAX_SECONDS": 5.0,        # 單次導航最長時間（秒）
+    "DRAG_HOLD_MIN": 0.5,           # 最短握住時間（秒）＝小步
+    "DRAG_HOLD_MAX": 5.0,          # 最長握住時間（秒）＝方向很準時就多走一些
+    "DRAG_SESSION_MAX": 6.0,        # 單次導航上限秒數（安全網）
+    "ANGLE_OK_STD": 12.0,           # 視為角度穩定的環向標準差（度）→ 可提前持續拖曳
+    "ANGLE_RELOCK_STD": 25.0,       # 角度發散時「重新鎖定」的門檻（度），高於此值暫停拖
+    "ANGLE_ABORT_DEG": 60.0,        # 與上次方向差超過此角度則視為大幅偏離，停止這輪
+    "ANGLE_SMOOTH_ALPHA": 0.35,     # 角度 EMA 平滑係數（0~1）
+    "ARROW_MISS_TOLERANCE": 4,      # 連續幾次找不到箭頭才視為「箭頭消失」
+
+    # 動態拖曳反饋參數
+    "DRAG_FEEDBACK_INTERVAL": 0.15, # 動態拖曳中檢查箭頭間隔（秒）
+    "DRAG_ANGLE_TOLERANCE": 25.0,   # 動態拖曳中角度變化容忍度（度）
+    "DRAG_MIN_TIME": 0.3,           # 動態拖曳最短時間（秒）
+
     # 主流程
     "MAX_ARROW_ATTEMPTS": 6,
     "MAIN_SEARCH_INTERVAL": 0.6,
@@ -347,6 +364,61 @@ class ConfigDialog(QDialog):
         
         tabs.addTab(movement_tab, "移動控制")
         
+        # 動態拖曳標籤頁
+        dynamic_drag_tab = QWidget()
+        dynamic_drag_layout = QFormLayout(dynamic_drag_tab)
+        
+        # 拖曳最短時間
+        self.drag_min_time_spin = QDoubleSpinBox()
+        self.drag_min_time_spin.setRange(0.1, 2.0)
+        self.drag_min_time_spin.setSingleStep(0.1)
+        self.drag_min_time_spin.setValue(self.cfg["DRAG_HOLD_MIN"])
+        dynamic_drag_layout.addRow("拖曳最短時間(秒):", self.drag_min_time_spin)
+        
+        # 拖曳最長時間
+        self.drag_max_time_spin = QDoubleSpinBox()
+        self.drag_max_time_spin.setRange(1.0, 10.0)
+        self.drag_max_time_spin.setSingleStep(0.5)
+        self.drag_max_time_spin.setValue(self.cfg["DRAG_HOLD_MAX"])
+        dynamic_drag_layout.addRow("拖曳最長時間(秒):", self.drag_max_time_spin)
+        
+        # 動態拖曳檢查間隔
+        self.drag_feedback_interval_spin = QDoubleSpinBox()
+        self.drag_feedback_interval_spin.setRange(0.05, 0.5)
+        self.drag_feedback_interval_spin.setSingleStep(0.05)
+        self.drag_feedback_interval_spin.setValue(self.cfg["DRAG_FEEDBACK_INTERVAL"])
+        dynamic_drag_layout.addRow("動態檢查間隔(秒):", self.drag_feedback_interval_spin)
+        
+        # 角度變化容忍度
+        self.drag_angle_tolerance_spin = QDoubleSpinBox()
+        self.drag_angle_tolerance_spin.setRange(5.0, 60.0)
+        self.drag_angle_tolerance_spin.setSingleStep(5.0)
+        self.drag_angle_tolerance_spin.setValue(self.cfg["DRAG_ANGLE_TOLERANCE"])
+        dynamic_drag_layout.addRow("角度變化容忍度(度):", self.drag_angle_tolerance_spin)
+        
+        # 最短動態拖曳時間
+        self.drag_min_dynamic_time_spin = QDoubleSpinBox()
+        self.drag_min_dynamic_time_spin.setRange(0.1, 1.0)
+        self.drag_min_dynamic_time_spin.setSingleStep(0.1)
+        self.drag_min_dynamic_time_spin.setValue(self.cfg["DRAG_MIN_TIME"])
+        dynamic_drag_layout.addRow("最短動態拖曳(秒):", self.drag_min_dynamic_time_spin)
+        
+        # 角度穩定標準差門檻
+        self.angle_ok_std_spin = QDoubleSpinBox()
+        self.angle_ok_std_spin.setRange(5.0, 30.0)
+        self.angle_ok_std_spin.setSingleStep(1.0)
+        self.angle_ok_std_spin.setValue(self.cfg["ANGLE_OK_STD"])
+        dynamic_drag_layout.addRow("角度穩定標準差(度):", self.angle_ok_std_spin)
+        
+        # 角度重新鎖定門檻
+        self.angle_relock_std_spin = QDoubleSpinBox()
+        self.angle_relock_std_spin.setRange(15.0, 50.0)
+        self.angle_relock_std_spin.setSingleStep(5.0)
+        self.angle_relock_std_spin.setValue(self.cfg["ANGLE_RELOCK_STD"])
+        dynamic_drag_layout.addRow("角度重鎖定門檻(度):", self.angle_relock_std_spin)
+        
+        tabs.addTab(dynamic_drag_tab, "動態拖曳")
+        
         # 時間控制標籤頁
         timing_tab = QWidget()
         timing_layout = QFormLayout(timing_tab)
@@ -457,6 +529,15 @@ class ConfigDialog(QDialog):
         self.arrow_interval_spin.setValue(DEFAULT_CFG["ARROW_SEARCH_INTERVAL"])
         self.max_attempts_spin.setValue(DEFAULT_CFG["MAX_ARROW_ATTEMPTS"])
         
+        # 動態拖曳
+        self.drag_min_time_spin.setValue(DEFAULT_CFG["DRAG_HOLD_MIN"])
+        self.drag_max_time_spin.setValue(DEFAULT_CFG["DRAG_HOLD_MAX"])
+        self.drag_feedback_interval_spin.setValue(DEFAULT_CFG["DRAG_FEEDBACK_INTERVAL"])
+        self.drag_angle_tolerance_spin.setValue(DEFAULT_CFG["DRAG_ANGLE_TOLERANCE"])
+        self.drag_min_dynamic_time_spin.setValue(DEFAULT_CFG["DRAG_MIN_TIME"])
+        self.angle_ok_std_spin.setValue(DEFAULT_CFG["ANGLE_OK_STD"])
+        self.angle_relock_std_spin.setValue(DEFAULT_CFG["ANGLE_RELOCK_STD"])
+        
     def get_config(self):
         """返回更新後的配置"""
         self.cfg["ICON_CONFIDENCE"] = self.icon_confidence_slider.value() / 100.0
@@ -487,6 +568,15 @@ class ConfigDialog(QDialog):
         self.cfg["MAIN_SEARCH_INTERVAL"] = self.main_interval_spin.value()
         self.cfg["ARROW_SEARCH_INTERVAL"] = self.arrow_interval_spin.value()
         self.cfg["MAX_ARROW_ATTEMPTS"] = self.max_attempts_spin.value()
+        
+        # 動態拖曳設置
+        self.cfg["DRAG_HOLD_MIN"] = self.drag_min_time_spin.value()
+        self.cfg["DRAG_HOLD_MAX"] = self.drag_max_time_spin.value()
+        self.cfg["DRAG_FEEDBACK_INTERVAL"] = self.drag_feedback_interval_spin.value()
+        self.cfg["DRAG_ANGLE_TOLERANCE"] = self.drag_angle_tolerance_spin.value()
+        self.cfg["DRAG_MIN_TIME"] = self.drag_min_dynamic_time_spin.value()
+        self.cfg["ANGLE_OK_STD"] = self.angle_ok_std_spin.value()
+        self.cfg["ANGLE_RELOCK_STD"] = self.angle_relock_std_spin.value()
         
         return self.cfg
 
@@ -847,7 +937,268 @@ class ArrowDetector:
         pyautogui.moveTo(cx, cy)
         pyautogui.mouseDown(button=self.drag_button)
         pyautogui.moveTo(tx, ty, duration=self.drag_seconds)
-        pyautogui.mouseUp(button=self.drag_button)      
+        pyautogui.mouseUp(button=self.drag_button)     
+
+    def _circular_stats(self, angles_deg):
+        if not angles_deg:
+            return None, 0.0, None
+        ang = np.deg2rad(np.array(angles_deg, dtype=np.float64))
+        C = np.cos(ang).sum(); S = np.sin(ang).sum()
+        n = max(len(angles_deg), 1)
+        R = np.sqrt(C*C + S*S) / n
+        mean_deg = (math.degrees(math.atan2(S, C)) + 360) % 360
+        R = max(min(R, 0.999999), 1e-6)
+        std_deg = math.degrees(math.sqrt(-2.0 * math.log(R)))
+        return mean_deg, R, std_deg
+
+    def _sample_angle_window(self, cx, cy, window_time):
+        t0 = time.time()
+        angles = []; last_loc = None
+        while time.time() - t0 < window_time:
+            loc, _, ang = self.find_arrow_by_color(cx, cy)
+            if loc is not None and ang is not None:
+                angles.append(ang); last_loc = loc
+            time.sleep(self.poll)
+        if not angles:
+            return None, None, None, 0
+        mean, _, std = self._circular_stats(angles)
+        return last_loc, mean, std, len(angles)
+
+    def _angle_diff(self, a, b):
+        return abs((b - a + 180) % 360 - 180)
+
+    def _dynamic_drag_with_feedback(self, cx, cy, initial_angle_deg, max_hold_seconds, cfg, log_fn=None):
+        """
+        動態拖曳：在拖曳過程中持續偵測箭頭方向並動態調整
+        - 如果箭頭方向保持一致，繼續拖曳直到max_hold_seconds
+        - 如果箭頭方向改變超過閾值，立即停止
+        - 如果箭頭消失，立即停止
+        """
+        def log(msg):
+            if log_fn:
+                log_fn(msg)
+        
+        sw, sh = pyautogui.size()
+        
+        # 拖曳參數
+        check_interval = float(cfg.get("DRAG_FEEDBACK_INTERVAL", 0.15))  # 每0.15秒檢查一次
+        angle_tolerance = float(cfg.get("DRAG_ANGLE_TOLERANCE", 25.0))   # 角度變化容忍度
+        min_drag_time = float(cfg.get("DRAG_MIN_TIME", 0.3))             # 最短拖曳時間
+        
+        # 計算初始目標位置
+        rad = math.radians(initial_angle_deg)
+        dx = self.drag_distance * math.sin(rad)
+        dy = -self.drag_distance * math.cos(rad)
+        tx = max(0, min(sw - 1, cx + dx))
+        ty = max(0, min(sh - 1, cy + dy))
+        
+        cx = int(round(cx)); cy = int(round(cy))
+        tx = int(round(tx)); ty = int(round(ty))
+        
+        log(f"[動態拖曳] 開始：角度{initial_angle_deg:.1f}°，最長{max_hold_seconds:.2f}s")
+        
+        # 開始拖曳
+        pyautogui.moveTo(cx, cy)
+        pyautogui.mouseDown(button=self.drag_button)
+        pyautogui.moveTo(tx, ty, duration=min(self.drag_seconds, 0.05))
+        
+        drag_start_time = time.time()
+        last_check_time = drag_start_time
+        total_corrections = 0
+        
+        try:
+            while True:
+                current_time = time.time()
+                elapsed = current_time - drag_start_time
+                
+                # 檢查是否達到最長時間
+                if elapsed >= max_hold_seconds:
+                    log(f"[動態拖曳] 達到最長時間{max_hold_seconds:.2f}s，結束")
+                    break
+                
+                # 檢查是否到了檢查間隔
+                if current_time - last_check_time >= check_interval and elapsed >= min_drag_time:
+                    # 重新偵測箭頭方向
+                    updated_center_loc, updated_scale = self.find_character()
+                    if updated_center_loc and updated_scale:
+                        updated_cx = updated_center_loc[0] + (self.template_width * updated_scale) / 2
+                        updated_cy = updated_center_loc[1] + (self.template_height * updated_scale) / 2
+                    else:
+                        updated_cx, updated_cy = cx, cy
+                    
+                    # 快速檢測當前箭頭角度（短窗口）
+                    _, current_angle, current_std, hits = self._sample_angle_window(
+                        updated_cx, updated_cy, window_time=max(self.poll*2, 0.1)
+                    )
+                    
+                    if hits == 0:
+                        log(f"[動態拖曳] 箭頭消失，提前結束（已拖{elapsed:.2f}s）")
+                        break
+                    
+                    if current_angle is not None:
+                        angle_diff = self._angle_diff(initial_angle_deg, current_angle)
+                        
+                        if angle_diff > angle_tolerance:
+                            log(f"[動態拖曳] 方向改變{angle_diff:.1f}°>容忍{angle_tolerance}°，提前結束（已拖{elapsed:.2f}s）")
+                            break
+                        
+                        # 如果角度變化不大但有微調空間，可以調整目標位置
+                        if angle_diff > 8.0 and total_corrections < 2:  # 允許小幅修正，但限制次數
+                            # 重新計算目標位置
+                            new_rad = math.radians(current_angle)
+                            new_dx = self.drag_distance * math.sin(new_rad)
+                            new_dy = -self.drag_distance * math.cos(new_rad)
+                            new_tx = max(0, min(sw - 1, updated_cx + new_dx))
+                            new_ty = max(0, min(sh - 1, updated_cy + new_dy))
+                            
+                            # 平滑調整到新位置
+                            pyautogui.moveTo(int(new_tx), int(new_ty), duration=0.1)
+                            total_corrections += 1
+                            log(f"[動態拖曳] 微調方向：{initial_angle_deg:.1f}°→{current_angle:.1f}° (第{total_corrections}次)")
+                            initial_angle_deg = current_angle  # 更新基準角度
+                        
+                        elif angle_diff <= 8.0:
+                            # 方向很好，可以考慮延長拖曳
+                            if current_std is not None and current_std < 10.0 and elapsed < max_hold_seconds * 0.7:
+                                # 角度很穩定，可以繼續拖更久
+                                pass
+                    
+                    last_check_time = current_time
+                
+                # 短暫休眠
+                time.sleep(0.05)
+                
+        finally:
+            pyautogui.mouseUp(button=self.drag_button)
+            final_elapsed = time.time() - drag_start_time
+            log(f"[動態拖曳] 完成：實際拖曳{final_elapsed:.2f}s，微調{total_corrections}次")
+
+    def _hold_drag_seconds(self, cx, cy, angle_deg, hold_seconds):
+        """
+        固定速度場景：用「握住多久」決定走多遠
+        流程：
+          1) mouseDown 在人物中心
+          2) 快速把游標丟到方向射線上固定距離（drag_distance）
+          3) 停留 hold_seconds（保持 mouseDown）
+          4) mouseUp
+        """
+        sw, sh = pyautogui.size()
+        rad = math.radians(angle_deg)
+        dx = self.drag_distance * math.sin(rad)
+        dy = -self.drag_distance * math.cos(rad)
+        tx = max(0, min(sw - 1, cx + dx))
+        ty = max(0, min(sh - 1, cy + dy))
+        cx = int(round(cx)); cy = int(round(cy))
+        tx = int(round(tx)); ty = int(round(ty))
+
+        pyautogui.moveTo(cx, cy)
+        pyautogui.mouseDown(button=self.drag_button)
+        # 游標快速定位到方向遠點，避免移動時間就是「握住時間」
+        pyautogui.moveTo(tx, ty, duration=min(self.drag_seconds, 0.05))
+        time.sleep(max(0.0, float(hold_seconds)))   # 真正的「握住秒數」
+        pyautogui.mouseUp(button=self.drag_button)
+
+    def guide_towards_arrow(self, get_center_fn, cfg, log_fn=None):
+        """
+        閉迴路導航（以秒為主）：
+        - 每回合先量測一個短窗角度（~0.25s），算出 std
+        - 依 std 在 [DRAG_HOLD_MIN, DRAG_HOLD_MAX] 之間選擇握住秒數
+          * std 越小 → hold 越長（更遠）
+          * std 大於 ANGLE_RELOCK_STD → 不拖，先重鎖
+        - 持續迴圈直到箭頭消失或達到 DRAG_SESSION_MAX
+        """
+        t0 = time.time()
+        ema_angle = None
+        miss = 0
+
+        STD_LOW  = float(cfg.get("ANGLE_OK_STD", 12.0))
+        STD_HIGH = float(cfg.get("ANGLE_RELOCK_STD", 25.0))
+        HOLD_MIN = float(cfg.get("DRAG_HOLD_MIN", 0.15))
+        HOLD_MAX = float(cfg.get("DRAG_HOLD_MAX", 1.20))
+        SESSION_MAX = float(cfg.get("DRAG_SESSION_MAX", 6.0))
+
+        def map_std_to_hold(std):
+            if std is None:
+                return HOLD_MIN * 0.7
+            # 0..1：std 在 [LOW, HIGH] 的位置；越小越靠近 0
+            t = (std - STD_LOW) / max(1e-6, (STD_HIGH - STD_LOW))
+            t = min(1.0, max(0.0, t))
+            # 低 std → 長握；高 std → 短握
+            return HOLD_MIN + (1.0 - t) * (HOLD_MAX - HOLD_MIN)
+
+        def log(msg):
+            if log_fn:
+                log_fn(msg)
+
+        action_count = 0
+        last_log_time = 0
+        
+        while time.time() - t0 < SESSION_MAX:
+            # 重新找人物中心（避免被移動後偏差）
+            center_loc, center_scale = self.find_character()
+            if center_loc and center_scale:
+                cx = center_loc[0] + (self.template_width * center_scale) / 2
+                cy = center_loc[1] + (self.template_height * center_scale) / 2
+            else:
+                cx, cy = get_center_fn()
+
+            # 取短窗角度樣本
+            _, mean, std, hits = self._sample_angle_window(cx, cy, window_time=max(self.poll*4, 0.25))
+            if hits == 0:
+                miss += 1
+                # 只在第一次和每隔一段時間記錄，避免頻繁輸出
+                current_time = time.time()
+                if miss == 1 or (current_time - last_log_time) >= 2.0:
+                    log(f"[導航] 找不到箭頭（{miss}/{cfg.get('ARROW_MISS_TOLERANCE',4)}）")
+                    last_log_time = current_time
+                    
+                if miss >= int(cfg.get("ARROW_MISS_TOLERANCE", 4)):
+                    log("[導航] 箭頭消失，結束導航")
+                    return
+                time.sleep(self.poll * 2)
+                continue
+            else:
+                miss = 0
+
+            # 角度發散就先不拖、再鎖定
+            if std is not None and std > STD_HIGH:
+                # 只在第一次記錄，避免重複輸出
+                if action_count == 0:
+                    log(f"[導航] 角度發散（std={std:.1f}°），暫停拖曳重新鎖定…")
+                time.sleep(self.poll * 3)
+                continue
+
+            # 角度 EMA 平滑（環形處理）
+            if ema_angle is None:
+                ema_angle = mean
+            else:
+                alpha = float(cfg.get("ANGLE_SMOOTH_ALPHA", 0.35))
+                delta = ((mean - ema_angle + 540) % 360) - 180
+                ema_angle = (ema_angle + alpha * delta + 360) % 360
+
+            # 大幅偏離保護
+            if self._angle_diff(ema_angle, mean) > float(cfg.get("ANGLE_ABORT_DEG", 60.0)):
+                log(f"[導航] 與瞬時角度差過大（ema={ema_angle:.1f}°, mean={mean:.1f}°），中止本輪")
+                return
+
+            hold_seconds = map_std_to_hold(std)
+            # 根據穩定性選擇拖曳方式
+            if std is not None and std <= STD_LOW:
+                # 角度很穩定，使用動態拖曳，可以走更遠
+                # 減少輸出頻率：每3次操作才記錄一次
+                if action_count % 3 == 0:
+                    log(f"[導航] 穩定（std={std:.1f}°），動態拖曳最長{hold_seconds:.2f}s")
+                self._dynamic_drag_with_feedback(cx, cy, ema_angle, hold_seconds, cfg, log_fn)
+            else:
+                # 角度不穩定，使用傳統固定時間拖曳，保守一點
+                shorter_hold = min(hold_seconds, HOLD_MIN * 2)  # 限制最長時間
+                if action_count % 3 == 0:
+                    log(f"[導航] 不穩定（std={std:.1f}°），固定拖曳{shorter_hold:.2f}s")
+                self._hold_drag_seconds(cx, cy, ema_angle, shorter_hold)
+            
+            action_count += 1
+            # 握完立刻再量測（越快越能修正）
+            time.sleep(max(self.poll, 0.05))
 
 # ==========================
 # Worker 執行緒（Start/Pause/Stop）
@@ -909,6 +1260,7 @@ class DetectorWorker(QThread):
 
         last_status = None
         search_t0 = 0
+        icon_lost_logged = False  # 避免重複記錄圖標消失
 
         self._log("=== 偵測開始 ===")
         while not self._stop_ev.is_set():
@@ -923,6 +1275,7 @@ class DetectorWorker(QThread):
                 if last_status != "found":
                     self._log(f"[{time.strftime('%H:%M:%S')}] 找到目標圖標：{location}")
                     last_status = "found"
+                    icon_lost_logged = False  # 重置標記
 
                 # 箭頭偵測迴圈
                 attempts = 0
@@ -930,11 +1283,15 @@ class DetectorWorker(QThread):
                     # 圖標是否還在
                     current_location, current_scale = icon.find_image_with_scaling()
                     if not current_location:
-                        self._log("目標圖標消失，回到搜尋。")
+                        if not icon_lost_logged:
+                            self._log("目標圖標消失，回到搜尋。")
+                            icon_lost_logged = True
                         last_status = None
                         break
 
-                    self._log(f"[箭頭偵測 {attempts+1}] 點擊圖標(預防性)")
+                    # 只在第一次嘗試時記錄，避免頻繁輸出
+                    if attempts == 0:
+                        self._log(f"[箭頭偵測 {attempts+1}] 點擊圖標(預防性)")
                     icon.click_center(current_location, current_scale, self.cfg)
                     time.sleep(self.cfg["PREVENTIVE_CLICK_DELAY"])
 
@@ -943,19 +1300,17 @@ class DetectorWorker(QThread):
                     if char_loc and char_scale:
                         cx = char_loc[0] + (arrow.template_width * char_scale) / 2
                         cy = char_loc[1] + (arrow.template_height * char_scale) / 2
-                        self._log(f"人物座標：({cx:.1f}, {cy:.1f})，蒐集箭頭角度…")
-                        arrow_loc, best_angle, hits = arrow.wait_for_arrow(cx, cy)
-                        if arrow_loc and best_angle is not None:
-                            self._log(f"命中 {hits} 次 → 角度 {best_angle:.1f}° → 拖曳移動")
-                            arrow.drag_towards_arrow(cx, cy, best_angle)
-                            time.sleep(self.cfg["POST_MOVE_DELAY"])
-                            self._log("移動後再次點圖標")
-                            icon.click_center(current_location, current_scale, self.cfg)
-                            time.sleep(self.cfg["FINAL_CHECK_DELAY"])
-                        else:
-                            self._log("未穩定偵測到箭頭")
+                        if attempts == 0:  # 只在第一次記錄
+                            self._log(f"人物座標：({cx:.1f}, {cy:.1f})，蒐集箭頭角度…")
+                        # 箭頭偵測迴圈
+                        attempts = 0
+                        while attempts < self.cfg["MAX_ARROW_ATTEMPTS"] and self._pause_ev.is_set() and not self._stop_ev.is_set():
+                            ok = self._follow_arrow_session(icon, arrow)
+                            attempts += 1
+                            time.sleep(self.cfg["ARROW_SEARCH_INTERVAL"])
                     else:
-                        self._log("未找到人物")
+                        if attempts == 0:  # 只在第一次記錄
+                            self._log("未找到人物")
 
                     attempts += 1
                     time.sleep(self.cfg["ARROW_SEARCH_INTERVAL"])
@@ -964,7 +1319,9 @@ class DetectorWorker(QThread):
                     self._log(f"[{time.strftime('%H:%M:%S')}] 搜尋目標圖標中…")
                     last_status = "searching"
                     search_t0 = time.time()
+                    icon_lost_logged = False  # 重置標記
                 else:
+                    # 只在超過30秒時記錄一次，避免頻繁輸出
                     if time.time() - search_t0 > 30:
                         self._log("持續搜尋中…(>30s)")
                         search_t0 = time.time()
@@ -972,6 +1329,42 @@ class DetectorWorker(QThread):
 
         self._log("=== 偵測結束 ===")
         self.signals.finished.emit()
+
+    def _follow_arrow_session(self, icon: ImageDetector, arrow: ArrowDetector):
+        """
+        先點圖標→找人物→如果角度穩定就連續導航；導航結束後再點圖標確認。
+        """
+        # 圖標是否還在
+        current_location, current_scale = icon.find_image_with_scaling()
+        if not current_location:
+            # 避免與主循環重複記錄
+            return False
+
+        # 預防性點一下（喚醒/聚焦）
+        icon.click_center(current_location, current_scale)
+        time.sleep(self.cfg["PREVENTIVE_CLICK_DELAY"])
+
+        # 找人物中心
+        char_loc, char_scale = arrow.find_character()
+        if not (char_loc and char_scale):
+            return False
+
+        cx = char_loc[0] + (arrow.template_width * char_scale) / 2
+        cy = char_loc[1] + (arrow.template_height * char_scale) / 2
+        self._log(f"開始閉迴路導航…")
+
+        # 連續導航直到箭頭消失或超時
+        arrow.guide_towards_arrow(
+            get_center_fn=lambda: (cx, cy),
+            cfg=self.cfg,
+            log_fn=self._log
+        )
+
+        # 到站後再點圖標確認
+        time.sleep(self.cfg["POST_MOVE_DELAY"])
+        icon.click_center(current_location, current_scale)
+        time.sleep(self.cfg["FINAL_CHECK_DELAY"])
+        return True        
 
 # ==========================
 # 半透明區域預覽遮罩
