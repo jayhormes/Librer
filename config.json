@@ -72,5 +72,15 @@
   "USE_EDGE_DETECTION": true,
   "EDGE_CANNY_LOW": 50,
   "EDGE_CANNY_HIGH": 150,
-  "EDGE_GAUSSIAN_KERNEL": 3
+  "EDGE_GAUSSIAN_KERNEL": 3,
+  "ENABLE_DISCORD_WEBHOOK": false,
+  "DISCORD_NOTIFICATION_TIMEOUT": 300,
+  "DISCORD_SELECTED_CHANNEL": "嘎嘎",
+  "DISCORD_CHANNELS": {
+    "嘎嘎": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+    "斯拉": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+    "毛": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+    "樹": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+    "棋": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+  }
 }

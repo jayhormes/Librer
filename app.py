@@ -1,9 +1,10 @@
 # app.py
-import sys, os, json, time, math, random, threading
+import sys, os, json, time, math, random, threading, requests
 import numpy as np
 import cv2
 import pyautogui
 import pygetwindow as gw
+from datetime import datetime
 
 from PySide6.QtCore import Qt, QRect, QPoint, Signal, QObject, QThread
 from PySide6.QtWidgets import (
@@ -121,6 +122,18 @@ DEFAULT_CFG = {
     # 視窗聚焦功能
     "ENABLE_WINDOW_FOCUS": True,        # 是否啟用視窗聚焦功能
     "WINDOW_FOCUS_ON_DETECTION": True,  # 在偵測到圖標時聚焦視窗
+    
+    # Discord Webhook 通知設定
+    "ENABLE_DISCORD_WEBHOOK": False,    # 是否啟用 Discord Webhook 通知
+    "DISCORD_NOTIFICATION_TIMEOUT": 300, # 多少秒沒偵測到圖標後發送通知 (預設5分鐘)
+    "DISCORD_SELECTED_CHANNEL": "嘎嘎",  # 預設選擇的頻道
+    "DISCORD_CHANNELS": {               # 預設頻道列表
+        "嘎嘎": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+        "斯拉": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN", 
+        "毛": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+        "樹": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN",
+        "棋": "https://discord.com/api/webhooks/YOUR_WEBHOOK_ID/YOUR_WEBHOOK_TOKEN"
+    },
     
     # 主流程
     "MAX_ARROW_ATTEMPTS": 6,
@@ -297,6 +310,147 @@ def save_cfg(cfg):
     cfg_path = config_file_path("config.json")
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
+
+# ==========================
+# Discord Webhook 通知功能
+# ==========================
+class DiscordNotifier:
+    """Discord Webhook 通知器"""
+    
+    def __init__(self, cfg):
+        self.cfg = cfg
+        self.last_detection_time = time.time()  # 最後檢測到圖標的時間
+        self.notification_sent = False  # 是否已發送通知
+        
+    def update_detection_time(self):
+        """更新最後檢測時間"""
+        self.last_detection_time = time.time()
+        self.notification_sent = False  # 重置通知狀態
+        
+    def check_and_notify(self):
+        """檢查是否需要發送通知"""
+        if not self.cfg.get("ENABLE_DISCORD_WEBHOOK", False):
+            return
+            
+        if self.notification_sent:
+            return
+            
+        # 計算沒有檢測到圖標的時間
+        no_detection_time = time.time() - self.last_detection_time
+        timeout = self.cfg.get("DISCORD_NOTIFICATION_TIMEOUT", 300)
+        
+        if no_detection_time >= timeout:
+            self.send_notification()
+            self.notification_sent = True
+            
+    def send_notification(self):
+        """發送 Discord 通知"""
+        try:
+            selected_channel = self.cfg.get("DISCORD_SELECTED_CHANNEL", "嘎嘎")
+            channels = self.cfg.get("DISCORD_CHANNELS", {})
+            webhook_url = channels.get(selected_channel, "")
+            
+            if not webhook_url:
+                print(f"[Discord] 頻道 '{selected_channel}' 的 Webhook URL 未設定")
+                return
+                
+            # 計算沒有檢測時間
+            no_detection_time = time.time() - self.last_detection_time
+            minutes = int(no_detection_time // 60)
+            seconds = int(no_detection_time % 60)
+            
+            # 構建通知消息
+            current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            embed = {
+                "title": "🔍 圖標檢測警告",
+                "description": f"已經 **{minutes}分{seconds}秒** 沒有檢測到目標圖標！",
+                "color": 0xff6b6b,  # 紅色
+                "timestamp": datetime.now().isoformat(),
+                "fields": [
+                    {
+                        "name": "⏰ 最後檢測時間",
+                        "value": datetime.fromtimestamp(self.last_detection_time).strftime("%H:%M:%S"),
+                        "inline": True
+                    },
+                    {
+                        "name": "📍 通知頻道",
+                        "value": selected_channel,
+                        "inline": True
+                    },
+                    {
+                        "name": "⚠️ 狀態",
+                        "value": "需要檢查應用程式",
+                        "inline": False
+                    }
+                ],
+                "footer": {
+                    "text": "Librer 圖標檢測器"
+                }
+            }
+            
+            payload = {
+                "embeds": [embed],
+                "username": "Librer Bot",
+                "avatar_url": "https://cdn.discordapp.com/emojis/1234567890123456789.png"  # 可選的頭像
+            }
+            
+            response = requests.post(webhook_url, json=payload, timeout=10)
+            
+            if response.status_code == 204:
+                print(f"[Discord] 成功發送通知到頻道: {selected_channel}")
+            else:
+                print(f"[Discord] 發送通知失敗: {response.status_code} - {response.text}")
+                
+        except requests.exceptions.RequestException as e:
+            print(f"[Discord] 網路錯誤: {e}")
+        except Exception as e:
+            print(f"[Discord] 發送通知時出現錯誤: {e}")
+            
+    def send_test_notification(self, channel_name, webhook_url):
+        """發送測試通知"""
+        try:
+            if not webhook_url:
+                return False, "Webhook URL 不能為空"
+                
+            embed = {
+                "title": "✅ 測試通知",
+                "description": "這是一個測試通知，確認 Webhook 設定正確！",
+                "color": 0x00ff00,  # 綠色
+                "timestamp": datetime.now().isoformat(),
+                "fields": [
+                    {
+                        "name": "📍 測試頻道",
+                        "value": channel_name,
+                        "inline": True
+                    },
+                    {
+                        "name": "⏰ 測試時間",
+                        "value": datetime.now().strftime("%H:%M:%S"),
+                        "inline": True
+                    }
+                ],
+                "footer": {
+                    "text": "Librer 圖標檢測器 - 測試模式"
+                }
+            }
+            
+            payload = {
+                "embeds": [embed],
+                "username": "Librer Bot (測試)",
+                "avatar_url": "https://cdn.discordapp.com/emojis/1234567890123456789.png"
+            }
+            
+            response = requests.post(webhook_url, json=payload, timeout=10)
+            
+            if response.status_code == 204:
+                return True, "測試通知發送成功！"
+            else:
+                return False, f"發送失敗: {response.status_code} - {response.text}"
+                
+        except requests.exceptions.RequestException as e:
+            return False, f"網路錯誤: {e}"
+        except Exception as e:
+            return False, f"發送錯誤: {e}"
 
 # ==========================
 # 公用函式
@@ -865,6 +1019,66 @@ class ConfigDialog(QDialog):
         
         tabs.addTab(advanced_tab, "高級設定")
         
+        # Discord 通知標籤頁
+        discord_tab = QWidget()
+        discord_layout = QFormLayout(discord_tab)
+        
+        # 啟用 Discord 通知
+        self.enable_discord_checkbox = QCheckBox("啟用 Discord Webhook 通知")
+        self.enable_discord_checkbox.setChecked(self.cfg.get("ENABLE_DISCORD_WEBHOOK", False))
+        discord_layout.addRow("", self.enable_discord_checkbox)
+        
+        # 通知超時時間
+        self.discord_timeout_spin = QSpinBox()
+        self.discord_timeout_spin.setRange(60, 3600)  # 1分鐘到1小時
+        self.discord_timeout_spin.setSuffix(" 秒")
+        self.discord_timeout_spin.setValue(self.cfg.get("DISCORD_NOTIFICATION_TIMEOUT", 300))
+        discord_layout.addRow("通知超時時間:", self.discord_timeout_spin)
+        
+        # 選擇頻道
+        self.discord_channel_combo = QComboBox()
+        self.discord_channel_combo.addItems(["嘎嘎", "斯拉", "毛", "樹", "棋"])
+        selected_channel = self.cfg.get("DISCORD_SELECTED_CHANNEL", "嘎嘎")
+        if selected_channel in ["嘎嘎", "斯拉", "毛", "樹", "棋"]:
+            self.discord_channel_combo.setCurrentText(selected_channel)
+        discord_layout.addRow("選擇頻道:", self.discord_channel_combo)
+        
+        # 頻道設定區塊
+        discord_layout.addRow("", QLabel())
+        channels_label = QLabel("頻道 Webhook URL 設定:")
+        channels_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        discord_layout.addRow(channels_label)
+        
+        # 各頻道的 Webhook URL 設定
+        self.discord_channel_urls = {}
+        channels = self.cfg.get("DISCORD_CHANNELS", {})
+        
+        for channel_name in ["嘎嘎", "斯拉", "毛", "樹", "棋"]:
+            url_layout = QHBoxLayout()
+            
+            url_input = QLineEdit()
+            url_input.setPlaceholderText(f"輸入 {channel_name} 頻道的 Webhook URL")
+            url_input.setText(channels.get(channel_name, ""))
+            self.discord_channel_urls[channel_name] = url_input
+            
+            test_btn = QPushButton("測試")
+            test_btn.setMaximumWidth(60)
+            test_btn.clicked.connect(lambda checked, name=channel_name: self._test_discord_webhook(name))
+            
+            url_layout.addWidget(url_input)
+            url_layout.addWidget(test_btn)
+            
+            discord_layout.addRow(f"{channel_name}:", url_layout)
+        
+        # 添加說明
+        discord_layout.addRow("", QLabel())
+        help_label = QLabel("💡 提示：在 Discord 頻道設定中創建 Webhook，複製 URL 貼上即可")
+        help_label.setStyleSheet("color: #666; font-size: 10px;")
+        help_label.setWordWrap(True)
+        discord_layout.addRow("", help_label)
+        
+        tabs.addTab(discord_tab, "Discord 通知")
+        
         layout.addWidget(tabs)
         
         # 按鈕
@@ -984,6 +1198,40 @@ class ConfigDialog(QDialog):
         self.enable_window_focus_checkbox.setChecked(DEFAULT_CFG["ENABLE_WINDOW_FOCUS"])
         self.window_focus_on_detection_checkbox.setChecked(DEFAULT_CFG["WINDOW_FOCUS_ON_DETECTION"])
         
+        # Discord 通知設定
+        self.enable_discord_checkbox.setChecked(DEFAULT_CFG["ENABLE_DISCORD_WEBHOOK"])
+        self.discord_timeout_spin.setValue(DEFAULT_CFG["DISCORD_NOTIFICATION_TIMEOUT"])
+        self.discord_channel_combo.setCurrentText(DEFAULT_CFG["DISCORD_SELECTED_CHANNEL"])
+        
+        # Discord 頻道 URL
+        default_channels = DEFAULT_CFG["DISCORD_CHANNELS"]
+        for channel_name, url_input in self.discord_channel_urls.items():
+            url_input.setText(default_channels.get(channel_name, ""))
+
+    def _test_discord_webhook(self, channel_name):
+        """測試 Discord Webhook"""
+        try:
+            url_input = self.discord_channel_urls[channel_name]
+            webhook_url = url_input.text().strip()
+            
+            if not webhook_url:
+                QMessageBox.warning(self, "測試失敗", f"請先設定 {channel_name} 頻道的 Webhook URL")
+                return
+            
+            # 創建臨時的 Discord 通知器進行測試
+            temp_cfg = {"DISCORD_CHANNELS": {channel_name: webhook_url}}
+            notifier = DiscordNotifier(temp_cfg)
+            
+            success, message = notifier.send_test_notification(channel_name, webhook_url)
+            
+            if success:
+                QMessageBox.information(self, "測試成功", f"{channel_name} 頻道: {message}")
+            else:
+                QMessageBox.warning(self, "測試失敗", f"{channel_name} 頻道: {message}")
+                
+        except Exception as e:
+            QMessageBox.critical(self, "測試錯誤", f"測試 {channel_name} 頻道時發生錯誤: {e}")
+        
     def get_config(self):
         """返回更新後的配置"""
         self.cfg["ICON_CONFIDENCE"] = self.icon_confidence_slider.value() / 100.0
@@ -1047,6 +1295,17 @@ class ConfigDialog(QDialog):
         self.cfg["PREVENTIVE_CLICK_DELAY"] = self.preventive_click_delay_spin.value()
         self.cfg["POST_MOVE_DELAY"] = self.post_move_delay_spin.value()
         self.cfg["FINAL_CHECK_DELAY"] = self.final_check_delay_spin.value()
+        
+        # Discord 通知設定
+        self.cfg["ENABLE_DISCORD_WEBHOOK"] = self.enable_discord_checkbox.isChecked()
+        self.cfg["DISCORD_NOTIFICATION_TIMEOUT"] = self.discord_timeout_spin.value()
+        self.cfg["DISCORD_SELECTED_CHANNEL"] = self.discord_channel_combo.currentText()
+        
+        # 更新 Discord 頻道 URL
+        discord_channels = {}
+        for channel_name, url_input in self.discord_channel_urls.items():
+            discord_channels[channel_name] = url_input.text().strip()
+        self.cfg["DISCORD_CHANNELS"] = discord_channels
         
         return self.cfg
 
@@ -1988,6 +2247,9 @@ class DetectorWorker(QThread):
         self._pause_ev = threading.Event()
         self._stop_ev = threading.Event()
         self._pause_ev.set()  # 預設可跑
+        
+        # 初始化 Discord 通知器
+        self.discord_notifier = DiscordNotifier(cfg)
 
     def pause(self):
         self._pause_ev.clear()
@@ -2057,6 +2319,9 @@ class DetectorWorker(QThread):
             # 尋找目標圖標
             location, scale = icon.find_image_with_scaling()
             if location and scale:
+                # 更新 Discord 通知器的檢測時間
+                self.discord_notifier.update_detection_time()
+                
                 if last_status != "found":
                     self._log(f"[{time.strftime('%H:%M:%S')}] 找到目標圖標：{location}")
                     last_status = "found"
@@ -2119,6 +2384,9 @@ class DetectorWorker(QThread):
                     search_t0 = time.time()
                     icon_lost_logged = False  # 重置標記
                 else:
+                    # 檢查是否需要發送 Discord 通知
+                    self.discord_notifier.check_and_notify()
+                    
                     # 只在超過30秒時記錄一次，避免頻繁輸出
                     if time.time() - search_t0 > 30:
                         self._log("持續搜尋中…(>30s)")
@@ -2941,6 +3209,11 @@ class MainWindow(QWidget):
                 # 保存配置到文件
                 save_cfg(self.cfg)
                 self.append_log("[設定] 參數設定已更新並儲存")
+                
+                # 更新 worker 的 Discord 通知器（如果 worker 正在運行）
+                if self.worker and self.worker.isRunning():
+                    self.worker.discord_notifier = DiscordNotifier(self.cfg)
+                    self.append_log("[設定] Discord 通知設定已更新")
                 
                 # 更新視窗狀態
                 self.refresh_window_status()
