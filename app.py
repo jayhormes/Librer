@@ -71,6 +71,12 @@ DEFAULT_CFG = {
     "ICON_SCALE_STEPS": 7,
     "CHARACTER_SCALE_RANGE": [0.8, 1.2],
     "CHARACTER_SCALE_STEPS": 7,
+    
+    # 邊緣檢測參數
+    "USE_EDGE_DETECTION": True,           # 是否啟用邊緣檢測
+    "EDGE_CANNY_LOW": 50,                # Canny 低閾值
+    "EDGE_CANNY_HIGH": 150,              # Canny 高閾值
+    "EDGE_GAUSSIAN_KERNEL": 3,           # 高斯模糊核大小
 
     # 箭頭/拖曳
     "ARROW_SEARCH_RADIUS": 140,
@@ -128,18 +134,166 @@ DEFAULT_CFG = {
 CFG_PATH = config_file_path("config.json")
 
 def load_cfg():
+    """載入配置文件，具備完整的向後兼容性支持"""
     cfg_path = config_file_path("config.json")
+    
     if os.path.exists(cfg_path):
-        with open(cfg_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        # 舊檔案補缺欄
-        for k,v in DEFAULT_CFG.items():
-            if k not in data:
-                data[k] = v
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            print(f"[警告] 配置文件格式錯誤: {e}")
+            print(f"[警告] 使用預設配置並備份原檔案")
+            backup_invalid_config(cfg_path)
+            return DEFAULT_CFG.copy()
+        except Exception as e:
+            print(f"[警告] 無法讀取配置文件: {e}")
+            print(f"[警告] 使用預設配置")
+            return DEFAULT_CFG.copy()
+        
+        # 向後兼容性處理
+        updated_items = []
+        type_corrected_items = []
+        
+        # 檢查並補充缺失的配置項目
+        for key, default_value in DEFAULT_CFG.items():
+            if key not in data:
+                data[key] = default_value
+                updated_items.append(key)
+            else:
+                # 類型檢查和自動修正
+                old_value = data[key]
+                corrected_value = validate_and_correct_type(key, old_value, default_value)
+                if corrected_value != old_value:
+                    data[key] = corrected_value
+                    type_corrected_items.append((key, old_value, corrected_value))
+        
+        # 移除不再使用的配置項目（可選）
+        removed_items = []
+        if "REMOVE_DEPRECATED_KEYS" in data and data["REMOVE_DEPRECATED_KEYS"]:
+            deprecated_keys = get_deprecated_keys()
+            for key in list(data.keys()):
+                if key in deprecated_keys:
+                    removed_items.append(key)
+                    del data[key]
+        
+        # 記錄兼容性處理結果
+        if updated_items or type_corrected_items or removed_items:
+            print(f"[配置兼容性] 處理舊版配置文件:")
+            
+            if updated_items:
+                print(f"  ✅ 新增 {len(updated_items)} 項配置: {', '.join(updated_items)}")
+            
+            if type_corrected_items:
+                print(f"  🔧 修正 {len(type_corrected_items)} 項類型:")
+                for key, old_val, new_val in type_corrected_items:
+                    print(f"    - {key}: {old_val} → {new_val}")
+            
+            if removed_items:
+                print(f"  🗑️  移除 {len(removed_items)} 項廢棄配置: {', '.join(removed_items)}")
+            
+            # 自動保存更新後的配置
+            try:
+                save_cfg(data)
+                print(f"  💾 配置已自動更新並保存")
+            except Exception as e:
+                print(f"  ⚠️  配置保存失敗: {e}")
+        
         return data
-    return DEFAULT_CFG.copy()
+    else:
+        print(f"[配置] 未找到配置文件，創建預設配置")
+        default_cfg = DEFAULT_CFG.copy()
+        try:
+            save_cfg(default_cfg)
+            print(f"[配置] 預設配置已保存到: {cfg_path}")
+        except Exception as e:
+            print(f"[警告] 無法保存預設配置: {e}")
+        return default_cfg
+
+def validate_and_correct_type(key, value, default_value):
+    """驗證並修正配置值的類型"""
+    if default_value is None:
+        return value
+    
+    expected_type = type(default_value)
+    
+    # 如果類型匹配，直接返回
+    if isinstance(value, expected_type):
+        return value
+    
+    # 嘗試類型轉換
+    try:
+        if expected_type == bool:
+            # 布林值特殊處理
+            if isinstance(value, str):
+                return value.lower() in ('true', '1', 'yes', 'on', 'enabled')
+            return bool(value)
+        
+        elif expected_type == int:
+            return int(float(value))  # 先轉float再轉int，避免"1.0"格式問題
+        
+        elif expected_type == float:
+            return float(value)
+        
+        elif expected_type == str:
+            return str(value)
+        
+        elif expected_type == list:
+            if isinstance(value, str):
+                # 嘗試解析字符串形式的列表
+                import ast
+                return ast.literal_eval(value)
+            return list(value)
+        
+        elif expected_type == dict:
+            if isinstance(value, str):
+                import ast
+                return ast.literal_eval(value)
+            return dict(value)
+        
+        else:
+            # 未知類型，返回默認值
+            print(f"[警告] 配置項 {key} 的值 {value} 無法轉換為預期類型 {expected_type}")
+            return default_value
+            
+    except (ValueError, TypeError, SyntaxError) as e:
+        print(f"[警告] 配置項 {key} 類型轉換失敗: {e}，使用預設值")
+        return default_value
+
+def get_deprecated_keys():
+    """獲取已廢棄的配置鍵列表"""
+    return [
+        # 在這裡添加不再使用的配置鍵
+        # 例如: "OLD_PARAMETER_NAME", "DEPRECATED_SETTING"
+    ]
+
+def backup_invalid_config(cfg_path):
+    """備份無效的配置文件"""
+    try:
+        import shutil
+        from datetime import datetime
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_path = f"{cfg_path}.backup_{timestamp}"
+        shutil.copy2(cfg_path, backup_path)
+        print(f"[備份] 原配置文件已備份至: {backup_path}")
+    except Exception as e:
+        print(f"[警告] 無法備份配置文件: {e}")
+
+def save_cfg_with_backup(cfg, cfg_path):
+    """保存配置文件，先創建備份"""
+    if os.path.exists(cfg_path):
+        try:
+            import shutil
+            backup_path = f"{cfg_path}.bak"
+            shutil.copy2(cfg_path, backup_path)
+        except Exception as e:
+            print(f"[警告] 無法創建配置備份: {e}")
+    
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
 
 def save_cfg(cfg):
+    """保存配置文件（原有函數保持不變）"""
     cfg_path = config_file_path("config.json")
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -359,6 +513,36 @@ class ConfigDialog(QDialog):
         character_scale_layout.addWidget(QLabel("最大:"))
         character_scale_layout.addWidget(self.character_scale_max_spin)
         detection_layout.addRow("人物縮放範圍:", character_scale_layout)
+        
+        # 邊緣檢測設定
+        detection_layout.addRow("", QLabel())  # 分隔線
+        edge_label = QLabel("邊緣檢測設定:")
+        edge_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        detection_layout.addRow(edge_label)
+        
+        # 啟用邊緣檢測
+        self.use_edge_detection_checkbox = QCheckBox("啟用邊緣檢測 (提高準確度)")
+        self.use_edge_detection_checkbox.setChecked(self.cfg.get("USE_EDGE_DETECTION", True))
+        detection_layout.addRow("", self.use_edge_detection_checkbox)
+        
+        # Canny 低閾值
+        self.edge_canny_low_spin = QSpinBox()
+        self.edge_canny_low_spin.setRange(10, 100)
+        self.edge_canny_low_spin.setValue(self.cfg.get("EDGE_CANNY_LOW", 50))
+        detection_layout.addRow("Canny 低閾值:", self.edge_canny_low_spin)
+        
+        # Canny 高閾值
+        self.edge_canny_high_spin = QSpinBox()
+        self.edge_canny_high_spin.setRange(50, 300)
+        self.edge_canny_high_spin.setValue(self.cfg.get("EDGE_CANNY_HIGH", 150))
+        detection_layout.addRow("Canny 高閾值:", self.edge_canny_high_spin)
+        
+        # 高斯核大小
+        self.edge_gaussian_kernel_spin = QSpinBox()
+        self.edge_gaussian_kernel_spin.setRange(1, 9)
+        self.edge_gaussian_kernel_spin.setSingleStep(2)
+        self.edge_gaussian_kernel_spin.setValue(self.cfg.get("EDGE_GAUSSIAN_KERNEL", 3))
+        detection_layout.addRow("高斯核大小:", self.edge_gaussian_kernel_spin)
         
         tabs.addTab(detection_tab, "偵測參數")
         
@@ -742,6 +926,12 @@ class ConfigDialog(QDialog):
         self.character_scale_min_spin.setValue(DEFAULT_CFG["CHARACTER_SCALE_RANGE"][0])
         self.character_scale_max_spin.setValue(DEFAULT_CFG["CHARACTER_SCALE_RANGE"][1])
         
+        # 邊緣檢測設定
+        self.use_edge_detection_checkbox.setChecked(DEFAULT_CFG["USE_EDGE_DETECTION"])
+        self.edge_canny_low_spin.setValue(DEFAULT_CFG["EDGE_CANNY_LOW"])
+        self.edge_canny_high_spin.setValue(DEFAULT_CFG["EDGE_CANNY_HIGH"])
+        self.edge_gaussian_kernel_spin.setValue(DEFAULT_CFG["EDGE_GAUSSIAN_KERNEL"])
+        
         # 箭頭偵測
         self.arrow_radius_slider.setValue(DEFAULT_CFG["ARROW_SEARCH_RADIUS"])
         self.arrow_min_area_slider.setValue(DEFAULT_CFG["ARROW_MIN_AREA"])
@@ -805,6 +995,12 @@ class ConfigDialog(QDialog):
         self.cfg["ICON_SCALE_RANGE"] = [self.icon_scale_min_spin.value(), self.icon_scale_max_spin.value()]
         self.cfg["CHARACTER_SCALE_RANGE"] = [self.character_scale_min_spin.value(), self.character_scale_max_spin.value()]
         
+        # 邊緣檢測設定
+        self.cfg["USE_EDGE_DETECTION"] = self.use_edge_detection_checkbox.isChecked()
+        self.cfg["EDGE_CANNY_LOW"] = self.edge_canny_low_spin.value()
+        self.cfg["EDGE_CANNY_HIGH"] = self.edge_canny_high_spin.value()
+        self.cfg["EDGE_GAUSSIAN_KERNEL"] = self.edge_gaussian_kernel_spin.value()
+        
         self.cfg["ARROW_SEARCH_RADIUS"] = self.arrow_radius_slider.value()
         self.cfg["ARROW_MIN_AREA"] = self.arrow_min_area_slider.value()
         self.cfg["ARROW_DETECTION_TIMEOUT"] = self.arrow_timeout_spin.value()
@@ -858,40 +1054,121 @@ class ConfigDialog(QDialog):
 # 你的偵測類別（略微改為讀 cfg 變數）
 # ==========================
 class ImageDetector:
-    def __init__(self, template_path, search_region, confidence=0.8, scale_steps=7, scale_range=(0.8,1.2)):
+    def __init__(self, template_path, search_region, confidence=0.8, scale_steps=7, scale_range=(0.8,1.2), use_edge_detection=True):
         self.template_path = template_path
         self.search_region = tuple(search_region)
         self.confidence = confidence
         self.scale_steps = scale_steps
         self.scale_range = scale_range
+        self.use_edge_detection = use_edge_detection
 
         self.template_img = cv2.imread(template_path, 0)
         if self.template_img is None:
             raise ValueError(f"無法載入圖片: {template_path}")
         self.template_width, self.template_height = self.template_img.shape[::-1]
+        
+        # 預處理模板邊緣（如果啟用邊緣檢測）
+        if self.use_edge_detection:
+            self.template_edge = self._preprocess_edge(self.template_img)
+
+    def _preprocess_edge(self, image_gray, gaussian_kernel=3, canny_low=50, canny_high=150):
+        """邊緣預處理 - 針對人物和圖標優化"""
+        # 高斯模糊降噪
+        blurred = cv2.GaussianBlur(image_gray, (gaussian_kernel, gaussian_kernel), 0)
+        
+        # Canny 邊緣檢測
+        edges = cv2.Canny(blurred, canny_low, canny_high)
+        
+        # 形態學操作增強邊緣連接性
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
+        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=1)
+        
+        return edges
+
+    def _hybrid_detection(self, screenshot_gray, scale):
+        """混合檢測：結合邊緣檢測和灰階匹配"""
+        # 調整模板大小
+        new_width = max(1, int(self.template_width * scale))
+        new_height = max(1, int(self.template_height * scale))
+        
+        if new_height > screenshot_gray.shape[0] or new_width > screenshot_gray.shape[1]:
+            return -1, (0, 0)
+        
+        edge_score = -1
+        gray_score = -1
+        edge_loc = (0, 0)
+        gray_loc = (0, 0)
+        
+        # 邊緣檢測匹配
+        if self.use_edge_detection:
+            try:
+                resized_edge = cv2.resize(self.template_edge, (new_width, new_height))
+                screenshot_edge = self._preprocess_edge(screenshot_gray)
+                
+                edge_result = cv2.matchTemplate(screenshot_edge, resized_edge, cv2.TM_CCOEFF_NORMED)
+                _, edge_score, _, edge_loc = cv2.minMaxLoc(edge_result)
+            except Exception as e:
+                print(f"[警告] 邊緣檢測失敗: {e}")
+                edge_score = -1
+        
+        # 灰階匹配 (作為輔助或備用)
+        try:
+            resized_gray = cv2.resize(self.template_img, (new_width, new_height))
+            gray_result = cv2.matchTemplate(screenshot_gray, resized_gray, cv2.TM_CCOEFF_NORMED)
+            _, gray_score, _, gray_loc = cv2.minMaxLoc(gray_result)
+        except Exception as e:
+            print(f"[警告] 灰階匹配失敗: {e}")
+            gray_score = -1
+        
+        # 選擇最佳結果
+        if self.use_edge_detection and edge_score > 0:
+            # 混合評分：邊緣檢測權重較高
+            if gray_score > 0:
+                combined_score = 0.7 * edge_score + 0.3 * gray_score
+            else:
+                combined_score = edge_score
+            
+            # 如果邊緣檢測結果可信，優先使用
+            if edge_score > gray_score * 0.8:
+                return combined_score, edge_loc
+            else:
+                return combined_score, gray_loc
+        else:
+            # 回退到純灰階匹配
+            return gray_score, gray_loc
 
     def find_image_with_scaling(self):
         scale_steps = self.scale_steps
         scale_range = self.scale_range
-        screenshot = pyautogui.screenshot(region=self.search_region)
-        screenshot_np = np.array(screenshot)
-        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+        
+        try:
+            screenshot = pyautogui.screenshot(region=self.search_region)
+            screenshot_np = np.array(screenshot)
+            screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+        except Exception as e:
+            print(f"[錯誤] 截圖失敗: {e}")
+            return None, None
 
         found_location = None
         max_corr = -1
         best_scale = None
 
         for scale in np.linspace(scale_range[0], scale_range[1], scale_steps):
-            w, h = self.template_img.shape[::-1]
-            resized_template = cv2.resize(self.template_img, (int(w * scale), int(h * scale)))
-            if resized_template.shape[0] > screenshot_gray.shape[0] or resized_template.shape[1] > screenshot_gray.shape[1]:
-                continue
-            res = cv2.matchTemplate(screenshot_gray, resized_template, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, max_loc = cv2.minMaxLoc(res)
-            if max_val > max_corr:
-                max_corr = max_val
-                top_left = max_loc
-                found_location = (top_left[0] + self.search_region[0], top_left[1] + self.search_region[1])
+            if self.use_edge_detection:
+                # 使用混合檢測
+                score, location = self._hybrid_detection(screenshot_gray, scale)
+            else:
+                # 傳統灰階匹配
+                w, h = self.template_img.shape[::-1]
+                resized_template = cv2.resize(self.template_img, (int(w * scale), int(h * scale)))
+                if resized_template.shape[0] > screenshot_gray.shape[0] or resized_template.shape[1] > screenshot_gray.shape[1]:
+                    continue
+                res = cv2.matchTemplate(screenshot_gray, resized_template, cv2.TM_CCOEFF_NORMED)
+                _, score, _, location = cv2.minMaxLoc(res)
+            
+            if score > max_corr:
+                max_corr = score
+                found_location = (location[0] + self.search_region[0], location[1] + self.search_region[1])
                 best_scale = scale
 
         if max_corr >= self.confidence:
@@ -1732,8 +2009,20 @@ class DetectorWorker(QThread):
                 search_region=self.cfg["ICON_SEARCH_REGION"],
                 confidence=self.cfg["ICON_CONFIDENCE"],
                 scale_steps=self.cfg["ICON_SCALE_STEPS"],
-                scale_range=tuple(self.cfg["ICON_SCALE_RANGE"])
+                scale_range=tuple(self.cfg["ICON_SCALE_RANGE"]),
+                use_edge_detection=self.cfg.get("USE_EDGE_DETECTION", True)
             )
+            
+            # 如果啟用邊緣檢測，設置相應參數
+            if self.cfg.get("USE_EDGE_DETECTION", True):
+                # 覆蓋預設的邊緣檢測參數
+                icon.template_edge = icon._preprocess_edge(
+                    icon.template_img,
+                    gaussian_kernel=self.cfg.get("EDGE_GAUSSIAN_KERNEL", 3),
+                    canny_low=self.cfg.get("EDGE_CANNY_LOW", 50),
+                    canny_high=self.cfg.get("EDGE_CANNY_HIGH", 150)
+                )
+            
             arrow = ArrowDetector(
                 character_template_path=config_file_path(self.cfg["CHARACTER_IMAGE_PATH"]),
                 search_region=self.cfg["CHARACTER_SEARCH_REGION"],
