@@ -141,7 +141,12 @@ DEFAULT_CFG = {
     "PREVENTIVE_CLICK_DELAY": 0.2,
     "POST_MOVE_DELAY": 0.25,
     "FINAL_CHECK_DELAY": 0.2,
-    "ARROW_SEARCH_INTERVAL": 0.2
+    "ARROW_SEARCH_INTERVAL": 0.2,
+    
+    # 日誌管理
+    "LOG_MAX_LINES": 500,           # 最大日誌行數，超過會自動清理
+    "LOG_CLEANUP_LINES": 100,       # 清理時保留的行數
+    "LOG_AUTO_CLEANUP": True        # 是否啟用自動日誌清理
 }
 
 CFG_PATH = config_file_path("config.json")
@@ -1087,6 +1092,29 @@ class ConfigDialog(QDialog):
         self.final_check_delay_spin.setValue(self.cfg["FINAL_CHECK_DELAY"])
         advanced_layout.addRow("最終檢查延遲(秒):", self.final_check_delay_spin)
         
+        # 分隔線
+        advanced_layout.addRow("", QLabel())
+        log_label = QLabel("日誌管理設定:")
+        log_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        advanced_layout.addRow(log_label)
+        
+        # 啟用自動日誌清理
+        self.log_auto_cleanup_checkbox = QCheckBox("啟用自動日誌清理")
+        self.log_auto_cleanup_checkbox.setChecked(self.cfg.get("LOG_AUTO_CLEANUP", True))
+        advanced_layout.addRow("", self.log_auto_cleanup_checkbox)
+        
+        # 最大日誌行數
+        self.log_max_lines_spin = QSpinBox()
+        self.log_max_lines_spin.setRange(100, 2000)
+        self.log_max_lines_spin.setValue(self.cfg.get("LOG_MAX_LINES", 500))
+        advanced_layout.addRow("最大日誌行數:", self.log_max_lines_spin)
+        
+        # 清理後保留行數
+        self.log_cleanup_lines_spin = QSpinBox()
+        self.log_cleanup_lines_spin.setRange(50, 500)
+        self.log_cleanup_lines_spin.setValue(self.cfg.get("LOG_CLEANUP_LINES", 100))
+        advanced_layout.addRow("清理後保留行數:", self.log_cleanup_lines_spin)
+        
         tabs.addTab(advanced_tab, "高級設定")
         
         # Discord 通知標籤頁
@@ -1272,6 +1300,11 @@ class ConfigDialog(QDialog):
         self.post_move_delay_spin.setValue(DEFAULT_CFG["POST_MOVE_DELAY"])
         self.final_check_delay_spin.setValue(DEFAULT_CFG["FINAL_CHECK_DELAY"])
         
+        # 日誌管理設定
+        self.log_auto_cleanup_checkbox.setChecked(DEFAULT_CFG.get("LOG_AUTO_CLEANUP", True))
+        self.log_max_lines_spin.setValue(DEFAULT_CFG.get("LOG_MAX_LINES", 500))
+        self.log_cleanup_lines_spin.setValue(DEFAULT_CFG.get("LOG_CLEANUP_LINES", 100))
+        
         # 視窗聚焦設定
         self.enable_window_focus_checkbox.setChecked(DEFAULT_CFG["ENABLE_WINDOW_FOCUS"])
         self.window_focus_on_detection_checkbox.setChecked(DEFAULT_CFG["WINDOW_FOCUS_ON_DETECTION"])
@@ -1374,6 +1407,11 @@ class ConfigDialog(QDialog):
         self.cfg["PREVENTIVE_CLICK_DELAY"] = self.preventive_click_delay_spin.value()
         self.cfg["POST_MOVE_DELAY"] = self.post_move_delay_spin.value()
         self.cfg["FINAL_CHECK_DELAY"] = self.final_check_delay_spin.value()
+        
+        # 日誌管理設定
+        self.cfg["LOG_AUTO_CLEANUP"] = self.log_auto_cleanup_checkbox.isChecked()
+        self.cfg["LOG_MAX_LINES"] = self.log_max_lines_spin.value()
+        self.cfg["LOG_CLEANUP_LINES"] = self.log_cleanup_lines_spin.value()
         
         # Discord 通知設定
         self.cfg["ENABLE_DISCORD_WEBHOOK"] = self.enable_discord_checkbox.isChecked()
@@ -3376,7 +3414,43 @@ class MainWindow(QWidget):
         self.resize(hint.width(), new_height)
 
     def append_log(self, s):
-        self.log.append(s)
+        # 添加時間戳記
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        formatted_msg = f"[{timestamp}] {s}"
+        
+        # 添加到日誌區域
+        self.log.append(formatted_msg)
+        
+        # 自動日誌清理
+        if self.cfg.get("LOG_AUTO_CLEANUP", True):
+            self._cleanup_log_if_needed()
+    
+    def _cleanup_log_if_needed(self):
+        """檢查並清理日誌，避免累積過多影響效能"""
+        max_lines = self.cfg.get("LOG_MAX_LINES", 500)
+        cleanup_lines = self.cfg.get("LOG_CLEANUP_LINES", 100)
+        
+        # 檢查當前行數
+        current_text = self.log.toPlainText()
+        lines = current_text.split('\n')
+        
+        if len(lines) > max_lines:
+            # 保留最新的行數，清除舊的
+            recent_lines = lines[-cleanup_lines:]
+            new_text = '\n'.join(recent_lines)
+            
+            # 添加清理標記
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            cleanup_msg = f"[{timestamp}] [系統] 日誌已清理，保留最新 {cleanup_lines} 行記錄"
+            new_text = cleanup_msg + '\n' + new_text
+            
+            # 更新日誌區域
+            self.log.setPlainText(new_text)
+            
+            # 捲動到底部
+            cursor = self.log.textCursor()
+            cursor.movePosition(cursor.End)
+            self.log.setTextCursor(cursor)
 
     def closeEvent(self, e):
         try:
