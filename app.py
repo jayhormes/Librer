@@ -98,6 +98,16 @@ DEFAULT_CFG = {
     "DRAG_HOLD_MAX": 5.0,          # 最長握住時間（秒）＝方向很準時就多走一些
     "DRAG_SESSION_MAX": 6.0,        # 單次導航上限秒數（安全網）
     "ANGLE_OK_STD": 12.0,           # 視為角度穩定的環向標準差（度）→ 可提前持續拖曳
+    
+    # 圓環檢測參數（增強版人物檢測）
+    "RING_DETECTION_ENABLED": True,     # 是否啟用圓環檢測
+    "RING_CIRCLE_R_MIN": 18,            # 圓環最小半徑
+    "RING_CIRCLE_R_MAX": 40,            # 圓環最大半徑
+    "RING_WHITE_V_THRESH": 200,         # 白色亮度閾值
+    "RING_WHITE_S_MAX": 60,             # 白色飽和度最大值
+    "RING_CONSISTENCY": 0.55,           # 圓周白色比例閾值
+    "RING_REFINE_WINDOW": 120,          # 模板驗證窗口大小
+    "RING_TEMPLATE_CONFIDENCE": 0.82,   # 模板二次驗證閾值
     "ANGLE_RELOCK_STD": 25.0,       # 角度發散時「重新鎖定」的門檻（度），高於此值暫停拖
     "ANGLE_ABORT_DEG": 60.0,        # 與上次方向差超過此角度則視為大幅偏離，停止這輪
     "ANGLE_SMOOTH_ALPHA": 0.35,     # 角度 EMA 平滑係數（0~1）
@@ -863,6 +873,101 @@ class ConfigDialog(QDialog):
         
         tabs.addTab(advanced_tab, "高級設定")
         
+        # 圓環檢測標籤頁（增強版人物檢測）
+        ring_tab = QWidget()
+        ring_layout = QFormLayout(ring_tab)
+        
+        # 啟用圓環檢測
+        self.ring_detection_enabled_checkbox = QCheckBox("啟用圓環檢測（增強版人物檢測）")
+        self.ring_detection_enabled_checkbox.setChecked(self.cfg.get("RING_DETECTION_ENABLED", True))
+        ring_layout.addRow("", self.ring_detection_enabled_checkbox)
+        
+        # 圓環半徑範圍
+        self.ring_r_min_spin = QSpinBox()
+        self.ring_r_min_spin.setRange(5, 50)
+        self.ring_r_min_spin.setValue(self.cfg.get("RING_CIRCLE_R_MIN", 18))
+        ring_layout.addRow("圓環最小半徑(像素):", self.ring_r_min_spin)
+        
+        self.ring_r_max_spin = QSpinBox()
+        self.ring_r_max_spin.setRange(20, 100)
+        self.ring_r_max_spin.setValue(self.cfg.get("RING_CIRCLE_R_MAX", 40))
+        ring_layout.addRow("圓環最大半徑(像素):", self.ring_r_max_spin)
+        
+        # 白色檢測參數
+        ring_layout.addRow("", QLabel())
+        white_label = QLabel("白色檢測參數:")
+        white_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        ring_layout.addRow(white_label)
+        
+        # 白色亮度閾值
+        self.ring_white_v_slider = QSlider(Qt.Horizontal)
+        self.ring_white_v_slider.setRange(150, 255)
+        self.ring_white_v_slider.setValue(self.cfg.get("RING_WHITE_V_THRESH", 200))
+        self.ring_white_v_label = QLabel()
+        self.ring_white_v_slider.valueChanged.connect(self._update_ring_white_v_label)
+        
+        white_v_layout = QHBoxLayout()
+        white_v_layout.addWidget(self.ring_white_v_slider)
+        white_v_layout.addWidget(self.ring_white_v_label)
+        ring_layout.addRow("白色亮度閾值:", white_v_layout)
+        
+        # 白色飽和度最大值
+        self.ring_white_s_slider = QSlider(Qt.Horizontal)
+        self.ring_white_s_slider.setRange(30, 120)
+        self.ring_white_s_slider.setValue(self.cfg.get("RING_WHITE_S_MAX", 60))
+        self.ring_white_s_label = QLabel()
+        self.ring_white_s_slider.valueChanged.connect(self._update_ring_white_s_label)
+        
+        white_s_layout = QHBoxLayout()
+        white_s_layout.addWidget(self.ring_white_s_slider)
+        white_s_layout.addWidget(self.ring_white_s_label)
+        ring_layout.addRow("白色飽和度上限:", white_s_layout)
+        
+        # 圓環一致性閾值
+        self.ring_consistency_slider = QSlider(Qt.Horizontal)
+        self.ring_consistency_slider.setRange(30, 90)
+        self.ring_consistency_slider.setValue(int(self.cfg.get("RING_CONSISTENCY", 0.55) * 100))
+        self.ring_consistency_label = QLabel()
+        self.ring_consistency_slider.valueChanged.connect(self._update_ring_consistency_label)
+        
+        consistency_layout = QHBoxLayout()
+        consistency_layout.addWidget(self.ring_consistency_slider)
+        consistency_layout.addWidget(self.ring_consistency_label)
+        ring_layout.addRow("圓周白色比例閾值:", consistency_layout)
+        
+        # 模板驗證參數
+        ring_layout.addRow("", QLabel())
+        template_label = QLabel("模板二次驗證:")
+        template_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        ring_layout.addRow(template_label)
+        
+        # 驗證窗口大小
+        self.ring_refine_window_spin = QSpinBox()
+        self.ring_refine_window_spin.setRange(60, 200)
+        self.ring_refine_window_spin.setValue(self.cfg.get("RING_REFINE_WINDOW", 120))
+        ring_layout.addRow("驗證窗口大小(像素):", self.ring_refine_window_spin)
+        
+        # 模板驗證信心度
+        self.ring_template_conf_slider = QSlider(Qt.Horizontal)
+        self.ring_template_conf_slider.setRange(60, 95)
+        self.ring_template_conf_slider.setValue(int(self.cfg.get("RING_TEMPLATE_CONFIDENCE", 0.82) * 100))
+        self.ring_template_conf_label = QLabel()
+        self.ring_template_conf_slider.valueChanged.connect(self._update_ring_template_conf_label)
+        
+        template_conf_layout = QHBoxLayout()
+        template_conf_layout.addWidget(self.ring_template_conf_slider)
+        template_conf_layout.addWidget(self.ring_template_conf_label)
+        ring_layout.addRow("模板驗證信心度:", template_conf_layout)
+        
+        # 添加說明
+        ring_layout.addRow("", QLabel())
+        ring_help_label = QLabel("💡 圓環檢測：先找人物腳下的白色圓環，再用模板驗證，提高檢測速度和精度")
+        ring_help_label.setStyleSheet("color: #666; font-size: 10px;")
+        ring_help_label.setWordWrap(True)
+        ring_layout.addRow("", ring_help_label)
+        
+        tabs.addTab(ring_tab, "圓環檢測")
+        
         # Discord 通知標籤頁
         discord_tab = QWidget()
         discord_layout = QFormLayout(discord_tab)
@@ -949,6 +1054,11 @@ class ConfigDialog(QDialog):
         self._update_arrow_radius_label()
         self._update_arrow_min_area_label()
         self._update_drag_distance_label()
+        # 圓環檢測標籤初始化
+        self._update_ring_white_v_label()
+        self._update_ring_white_s_label()
+        self._update_ring_consistency_label()
+        self._update_ring_template_conf_label()
         
     def _update_icon_confidence_label(self):
         value = self.icon_confidence_slider.value() / 100.0
@@ -969,6 +1079,22 @@ class ConfigDialog(QDialog):
     def _update_drag_distance_label(self):
         value = self.drag_distance_slider.value()
         self.drag_distance_label.setText(f"{value} px")
+    
+    def _update_ring_white_v_label(self):
+        value = self.ring_white_v_slider.value()
+        self.ring_white_v_label.setText(f"{value}")
+    
+    def _update_ring_white_s_label(self):
+        value = self.ring_white_s_slider.value()
+        self.ring_white_s_label.setText(f"{value}")
+    
+    def _update_ring_consistency_label(self):
+        value = self.ring_consistency_slider.value()
+        self.ring_consistency_label.setText(f"{value/100:.2f}")
+    
+    def _update_ring_template_conf_label(self):
+        value = self.ring_template_conf_slider.value()
+        self.ring_template_conf_label.setText(f"{value/100:.2f}")
         
     def _reset_to_defaults(self):
         """重設所有值為預設值"""
@@ -1149,6 +1275,16 @@ class ConfigDialog(QDialog):
             discord_channels[channel_name] = url_input.text().strip()
         self.cfg["DISCORD_CHANNELS"] = discord_channels
         
+        # 圓環檢測設定
+        self.cfg["RING_DETECTION_ENABLED"] = self.ring_detection_enabled_checkbox.isChecked()
+        self.cfg["RING_CIRCLE_R_MIN"] = self.ring_r_min_spin.value()
+        self.cfg["RING_CIRCLE_R_MAX"] = self.ring_r_max_spin.value()
+        self.cfg["RING_WHITE_V_THRESH"] = self.ring_white_v_slider.value()
+        self.cfg["RING_WHITE_S_MAX"] = self.ring_white_s_slider.value()
+        self.cfg["RING_CONSISTENCY"] = self.ring_consistency_slider.value() / 100.0
+        self.cfg["RING_REFINE_WINDOW"] = self.ring_refine_window_spin.value()
+        self.cfg["RING_TEMPLATE_CONFIDENCE"] = self.ring_template_conf_slider.value() / 100.0
+        
         return self.cfg
 
 # ==========================
@@ -1265,7 +1401,184 @@ class ArrowDetector:
             raise ValueError(f"無法載入圖片: {character_template_path}")
         self.template_width, self.template_height = self.template_img.shape[::-1]
 
-    def find_character(self):
+    def find_ring_then_match(self, search_region=None, 
+                           circle_r_min=18, circle_r_max=40,  # 依解析度調整
+                           dp=1.2, minDist=25, param1=120, param2=18,
+                           white_v_thresh=200, white_s_max=60,
+                           ring_consistency=0.55,               # 圓周取樣有多少比例是「白」
+                           refine_window=120,                    # 小窗大小（正方形）
+                           confidence=0.82):
+        """
+        先用 HoughCircles 找白色圓環中心；可選擇在中心附近做模板比對做二次驗證。
+        回傳：(center_xy, radius, score)；找不到回傳 (None, None, None)
+        """
+        if search_region is None:
+            search_region = self.search_region
+            
+        rx, ry, rw, rh = map(int, search_region)
+
+        try:
+            shot = pyautogui.screenshot(region=(rx, ry, rw, rh))
+        except Exception as e:
+            print(f"[ring] 截圖失敗: {e}")
+            return None, None, None
+
+        img = np.array(shot)
+        if img.size == 0:
+            return None, None, None
+
+        # ---- 預處理：強化白圈並壓背景 ----
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        H, S, V = cv2.split(hsv)
+
+        # 以「亮且不太飽和」挑白
+        white = cv2.inRange(hsv, (0, 0, white_v_thresh), (179, white_s_max, 255))
+
+        # 平滑 + 邊緣
+        blur = cv2.GaussianBlur(white, (5,5), 0)
+        edges = cv2.Canny(blur, 50, 150)
+
+        # ---- Hough 圓偵測 ----
+        circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, dp=dp, minDist=minDist,
+                                   param1=param1, param2=param2,
+                                   minRadius=circle_r_min, maxRadius=circle_r_max)
+
+        if circles is None:
+            return None, None, None
+
+        circles = np.round(circles[0, :]).astype(int)
+
+        # ---- 針對每個候選做「白圈一致性」檢查，挑最佳 ----
+        best = (None, None, -1.0)  # (center_xy_global, r, score)
+
+        h, w = white.shape[:2]
+        for (cx, cy, r) in circles:
+            if not (0 <= cx < w and 0 <= cy < h):
+                continue
+
+            # 在圓周上取樣 N 個點，計算白色比例
+            N = max(36, int(2 * math.pi * r / 8))  # 半徑越大取樣越多
+            thetas = np.linspace(0, 2*np.pi, N, endpoint=False)
+            xs = (cx + r * np.cos(thetas)).astype(int)
+            ys = (cy + r * np.sin(thetas)).astype(int)
+            xs = np.clip(xs, 0, w-1)
+            ys = np.clip(ys, 0, h-1)
+
+            ring_white_ratio = (white[ys, xs] > 0).mean()
+
+            # 也檢查「中心附近不是白」（避免把亮點誤當實心圓）
+            inner_r = max(2, int(r*0.45))
+            mask_inner = np.zeros_like(white)
+            cv2.circle(mask_inner, (cx, cy), inner_r, 255, -1)
+            inner_white_ratio = (white[mask_inner > 0] > 0).mean()
+
+            # 綜合分數：白圈比例高且中心白比例低
+            score = ring_white_ratio - 0.4*inner_white_ratio
+
+            if ring_white_ratio >= ring_consistency and score > best[2]:
+                best = ((cx + rx, cy + ry), r, score)
+
+        if best[0] is None:
+            return None, None, None
+
+        center_xy_global, r_best, score = best
+
+        # ---- 可選：在白圈中心附近開小窗做模板二次驗證 ----
+        if self.template_img is not None:
+            cxg, cyg = center_xy_global
+            half = refine_window // 2
+
+            wx = max(rx, cxg - half)
+            wy = max(ry, cyg - half)
+            wx2 = min(rx + rw, cxg + half)
+            wy2 = min(ry + rh, cyg + half)
+
+            wW, wH = wx2 - wx, wy2 - wy
+            if wW < 10 or wH < 10:
+                # 小窗不合理就直接回傳白圈
+                return center_xy_global, r_best, score
+
+            # 取小窗並做模板比對
+            try:
+                win = np.array(pyautogui.screenshot(region=(wx, wy, wW, wH)))
+                win_gray = cv2.cvtColor(win, cv2.COLOR_RGB2GRAY)
+
+                tmpl = self.template_img.copy()
+                if len(tmpl.shape) == 3:
+                    tmpl = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
+
+                # 尺度：模板若比小窗大就縮
+                th, tw = tmpl.shape[:2]
+                scale = min(wW / max(1, tw), wH / max(1, th), 1.0)
+                if scale < 1.0:
+                    tmpl = cv2.resize(tmpl, (int(tw*scale), int(th*scale)), interpolation=cv2.INTER_AREA)
+
+                if tmpl.shape[0] <= win_gray.shape[0] and tmpl.shape[1] <= win_gray.shape[1]:
+                    res = cv2.matchTemplate(win_gray, tmpl, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+                    if max_val < confidence:
+                        # 模板驗證沒過，仍可回傳「白圈中心」（通常已足夠做移動）
+                        return center_xy_global, r_best, score
+                    else:
+                        # 模板驗證通過，回傳更高的分數
+                        return center_xy_global, r_best, max_val
+            except Exception as e:
+                print(f"[警告] 模板二次驗證失敗: {e}")
+                # 驗證失敗，回傳白圈結果
+                return center_xy_global, r_best, score
+
+        # 單純找白圈就夠用
+        return center_xy_global, r_best, score
+
+    def find_character_enhanced(self, cfg=None, use_ring_detection=True, fallback_to_template=True):
+        """
+        增強版人物檢測：優先使用圓環檢測，失敗時可回退到傳統模板匹配
+        回傳：(location, scale) 或 (None, None)
+        """
+        if cfg is None:
+            # 使用默認配置
+            cfg = DEFAULT_CFG
+            
+        # 檢查是否啟用圓環檢測
+        if use_ring_detection and cfg.get("RING_DETECTION_ENABLED", True):
+            try:
+                center_xy, radius, score = self.find_ring_then_match(
+                    circle_r_min=cfg.get("RING_CIRCLE_R_MIN", 18),
+                    circle_r_max=cfg.get("RING_CIRCLE_R_MAX", 40),
+                    white_v_thresh=cfg.get("RING_WHITE_V_THRESH", 200),
+                    white_s_max=cfg.get("RING_WHITE_S_MAX", 60),
+                    ring_consistency=cfg.get("RING_CONSISTENCY", 0.55),
+                    refine_window=cfg.get("RING_REFINE_WINDOW", 120),
+                    confidence=cfg.get("RING_TEMPLATE_CONFIDENCE", 0.82)
+                )
+                if center_xy is not None:
+                    # 將圓環中心轉換為兼容的 location, scale 格式
+                    # 假設圓環中心就是角色的中心，計算對應的左上角位置
+                    cx, cy = center_xy
+                    # 使用平均尺度作為檢測到的尺度
+                    estimated_scale = 1.0
+                    
+                    # 計算左上角位置（假設模板中心對應圓環中心）
+                    half_w = (self.template_width * estimated_scale) / 2
+                    half_h = (self.template_height * estimated_scale) / 2
+                    location = (int(cx - half_w), int(cy - half_h))
+                    
+                    print(f"[增強檢測] 圓環檢測成功：中心({cx}, {cy})，分數={score:.3f}")
+                    return location, estimated_scale
+                else:
+                    print("[增強檢測] 圓環檢測未找到結果")
+            except Exception as e:
+                print(f"[增強檢測] 圓環檢測異常: {e}")
+        
+        # 圓環檢測失敗，回退到傳統模板匹配
+        if fallback_to_template:
+            print("[增強檢測] 回退到傳統模板匹配")
+            return self.find_character_original()
+        
+        return None, None
+
+    def find_character_original(self):
         try:
             rx, ry, rw, rh = map(int, self.search_region)
             
@@ -1329,6 +1642,12 @@ class ArrowDetector:
         except Exception as e:
             print(f"[錯誤] 人物偵測整體異常: {e}")
             return None, None
+
+    def find_character(self, cfg=None):
+        """
+        主要的人物檢測方法，使用增強版檢測（圓環+模板雙重驗證）
+        """
+        return self.find_character_enhanced(cfg)
 
     def _circular_stats(self, angles_deg):
         """回傳 (均值角度deg, R, circular_std_deg)；angles_deg 為 list[float]"""
@@ -1719,7 +2038,7 @@ class ArrowDetector:
                 if current_time - last_check_time >= check_interval and elapsed >= min_drag_time:
                     # 重新偵測箭頭方向
                     try:
-                        updated_center_loc, updated_scale = self.find_character()
+                        updated_center_loc, updated_scale = self.find_character(cfg)
                         if updated_center_loc and updated_scale:
                             updated_cx = updated_center_loc[0] + (self.template_width * updated_scale) / 2
                             updated_cy = updated_center_loc[1] + (self.template_height * updated_scale) / 2
@@ -1909,7 +2228,7 @@ class ArrowDetector:
         while time.time() - t0 < SESSION_MAX:
             # 重新找人物中心（避免被移動後偏差）
             try:
-                center_loc, center_scale = self.find_character()
+                center_loc, center_scale = self.find_character(cfg)
                 if center_loc and center_scale:
                     cx = center_loc[0] + (self.template_width * center_scale) / 2
                     cy = center_loc[1] + (self.template_height * center_scale) / 2
@@ -2098,7 +2417,7 @@ class DetectorWorker(QThread):
                     time.sleep(self.cfg["PREVENTIVE_CLICK_DELAY"])
 
                     # 找人物
-                    char_loc, char_scale = arrow.find_character()
+                    char_loc, char_scale = arrow.find_character(self.cfg)
                     if char_loc and char_scale:
                         cx = char_loc[0] + (arrow.template_width * char_scale) / 2
                         cy = char_loc[1] + (arrow.template_height * char_scale) / 2
@@ -2177,7 +2496,7 @@ class DetectorWorker(QThread):
 
             # 找人物中心
             try:
-                char_loc, char_scale = arrow.find_character()
+                char_loc, char_scale = arrow.find_character(self.cfg)
             except Exception as e:
                 print(f"[警告] 箭頭會話中人物偵測異常: {e}")
                 return False
