@@ -216,7 +216,7 @@ class DiscordNotifier:
                 "title": "🔍 圖標檢測警告",
                 "description": f"已經 **{minutes}分{seconds}秒** 沒有檢測到目標圖標！",
                 "color": 0xff6b6b,  # 紅色
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.utcnow().isoformat() + "Z",  # 使用 UTC 時間
                 "fields": [
                     {
                         "name": "⏰ 最後檢測時間",
@@ -267,7 +267,7 @@ class DiscordNotifier:
                 "title": "✅ 測試通知",
                 "description": "這是一個測試通知，確認 Webhook 設定正確！",
                 "color": 0x00ff00,  # 綠色
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.utcnow().isoformat() + "Z",  # 使用 UTC 時間
                 "fields": [
                     {
                         "name": "📍 測試頻道",
@@ -2072,7 +2072,7 @@ class DetectorWorker(QThread):
                 self.discord_notifier.update_detection_time()
                 
                 if last_status != "found":
-                    self._log(f"[{time.strftime('%H:%M:%S')}] 找到目標圖標：{location}")
+                    self._log(f"找到目標圖標：{location}")
                     last_status = "found"
                     icon_lost_logged = False  # 重置標記
 
@@ -2087,6 +2087,9 @@ class DetectorWorker(QThread):
                             icon_lost_logged = True
                         last_status = None
                         break
+                    else:
+                        # 圖標仍然存在，更新檢測時間
+                        self.discord_notifier.update_detection_time()
 
                     # 只在第一次嘗試時記錄，避免頻繁輸出
                     if attempts == 0:
@@ -2115,7 +2118,7 @@ class DetectorWorker(QThread):
                     time.sleep(self.cfg["ARROW_SEARCH_INTERVAL"])
             else:
                 if last_status != "searching":
-                    self._log(f"[{time.strftime('%H:%M:%S')}] 搜尋目標圖標中…")
+                    self._log("搜尋目標圖標中…")
                     
                     # 在開始搜尋之前先嘗試聚焦目標視窗
                     if (self.cfg.get("ENABLE_WINDOW_FOCUS", False) and 
@@ -2160,6 +2163,9 @@ class DetectorWorker(QThread):
             if not current_location:
                 # 避免與主循環重複記錄
                 return False
+            else:
+                # 圖標仍然存在，更新檢測時間
+                self.discord_notifier.update_detection_time()
 
             # 預防性點一下（喚醒/聚焦）
             try:
