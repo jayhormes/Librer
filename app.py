@@ -108,6 +108,12 @@ DEFAULT_CFG = {
     "RING_CONSISTENCY": 0.55,           # 圓周白色比例閾值
     "RING_REFINE_WINDOW": 120,          # 模板驗證窗口大小
     "RING_TEMPLATE_CONFIDENCE": 0.82,   # 模板二次驗證閾值
+    
+    # 圖標增強檢測參數
+    "ICON_ENHANCED_DETECTION": True,    # 是否啟用圖標增強檢測
+    "ICON_MASK_ALPHA": 0.5,             # 灰階+遮罩 與 邊緣 的融合權重
+    "ICON_RATIO_THRESHOLD": 1.12,       # 最佳/次佳 比例門檻
+    "ICON_ENHANCED_CONFIDENCE": 0.84,   # 增強檢測信心度閾值
     "ANGLE_RELOCK_STD": 25.0,       # 角度發散時「重新鎖定」的門檻（度），高於此值暫停拖
     "ANGLE_ABORT_DEG": 60.0,        # 與上次方向差超過此角度則視為大幅偏離，停止這輪
     "ANGLE_SMOOTH_ALPHA": 0.35,     # 角度 EMA 平滑係數（0~1）
@@ -968,6 +974,72 @@ class ConfigDialog(QDialog):
         
         tabs.addTab(ring_tab, "圓環檢測")
         
+        # 圖標增強檢測標籤頁
+        icon_enhanced_tab = QWidget()
+        icon_enhanced_layout = QFormLayout(icon_enhanced_tab)
+        
+        # 啟用圖標增強檢測
+        self.icon_enhanced_enabled_checkbox = QCheckBox("啟用圖標增強檢測（智能遮罩+多重比對）")
+        self.icon_enhanced_enabled_checkbox.setChecked(self.cfg.get("ICON_ENHANCED_DETECTION", True))
+        icon_enhanced_layout.addRow("", self.icon_enhanced_enabled_checkbox)
+        
+        # 融合權重參數
+        icon_enhanced_layout.addRow("", QLabel())
+        fusion_label = QLabel("融合權重參數:")
+        fusion_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        icon_enhanced_layout.addRow(fusion_label)
+        
+        # 遮罩與邊緣融合權重
+        self.icon_mask_alpha_slider = QSlider(Qt.Horizontal)
+        self.icon_mask_alpha_slider.setRange(0, 100)
+        self.icon_mask_alpha_slider.setValue(int(self.cfg.get("ICON_MASK_ALPHA", 0.5) * 100))
+        self.icon_mask_alpha_label = QLabel()
+        self.icon_mask_alpha_slider.valueChanged.connect(self._update_icon_mask_alpha_label)
+        
+        mask_alpha_layout = QHBoxLayout()
+        mask_alpha_layout.addWidget(self.icon_mask_alpha_slider)
+        mask_alpha_layout.addWidget(self.icon_mask_alpha_label)
+        icon_enhanced_layout.addRow("遮罩權重（vs邊緣）:", mask_alpha_layout)
+        
+        # 置信度參數
+        icon_enhanced_layout.addRow("", QLabel())
+        confidence_label = QLabel("置信度參數:")
+        confidence_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        icon_enhanced_layout.addRow(confidence_label)
+        
+        # 增強檢測信心度
+        self.icon_enhanced_conf_slider = QSlider(Qt.Horizontal)
+        self.icon_enhanced_conf_slider.setRange(70, 95)
+        self.icon_enhanced_conf_slider.setValue(int(self.cfg.get("ICON_ENHANCED_CONFIDENCE", 0.84) * 100))
+        self.icon_enhanced_conf_label = QLabel()
+        self.icon_enhanced_conf_slider.valueChanged.connect(self._update_icon_enhanced_conf_label)
+        
+        enhanced_conf_layout = QHBoxLayout()
+        enhanced_conf_layout.addWidget(self.icon_enhanced_conf_slider)
+        enhanced_conf_layout.addWidget(self.icon_enhanced_conf_label)
+        icon_enhanced_layout.addRow("增強檢測信心度:", enhanced_conf_layout)
+        
+        # 比例門檻
+        self.icon_ratio_threshold_slider = QSlider(Qt.Horizontal)
+        self.icon_ratio_threshold_slider.setRange(105, 150)
+        self.icon_ratio_threshold_slider.setValue(int(self.cfg.get("ICON_RATIO_THRESHOLD", 1.12) * 100))
+        self.icon_ratio_threshold_label = QLabel()
+        self.icon_ratio_threshold_slider.valueChanged.connect(self._update_icon_ratio_threshold_label)
+        
+        ratio_threshold_layout = QHBoxLayout()
+        ratio_threshold_layout.addWidget(self.icon_ratio_threshold_slider)
+        ratio_threshold_layout.addWidget(self.icon_ratio_threshold_label)
+        icon_enhanced_layout.addRow("最佳/次佳比例門檻:", ratio_threshold_layout)
+        
+        # 添加說明
+        icon_enhanced_layout.addRow("", QLabel())
+        icon_enhanced_help_label = QLabel("💡 智能遮罩檢測：自動識別關鍵特徵（白色對話框、青藍光圈），排除干擾（紅色驚嘆號）")
+        icon_enhanced_help_label.setStyleSheet("color: #666; font-size: 10px;")
+        icon_enhanced_help_label.setWordWrap(True)
+        icon_enhanced_layout.addRow("", icon_enhanced_help_label)
+        
+        tabs.addTab(icon_enhanced_tab, "圖標增強檢測")
+        
         # Discord 通知標籤頁
         discord_tab = QWidget()
         discord_layout = QFormLayout(discord_tab)
@@ -1059,6 +1131,10 @@ class ConfigDialog(QDialog):
         self._update_ring_white_s_label()
         self._update_ring_consistency_label()
         self._update_ring_template_conf_label()
+        # 圖標增強檢測標籤初始化
+        self._update_icon_mask_alpha_label()
+        self._update_icon_enhanced_conf_label()
+        self._update_icon_ratio_threshold_label()
         
     def _update_icon_confidence_label(self):
         value = self.icon_confidence_slider.value() / 100.0
@@ -1095,6 +1171,18 @@ class ConfigDialog(QDialog):
     def _update_ring_template_conf_label(self):
         value = self.ring_template_conf_slider.value()
         self.ring_template_conf_label.setText(f"{value/100:.2f}")
+    
+    def _update_icon_mask_alpha_label(self):
+        value = self.icon_mask_alpha_slider.value()
+        self.icon_mask_alpha_label.setText(f"{value/100:.2f}")
+    
+    def _update_icon_enhanced_conf_label(self):
+        value = self.icon_enhanced_conf_slider.value()
+        self.icon_enhanced_conf_label.setText(f"{value/100:.2f}")
+    
+    def _update_icon_ratio_threshold_label(self):
+        value = self.icon_ratio_threshold_slider.value()
+        self.icon_ratio_threshold_label.setText(f"{value/100:.2f}")
         
     def _reset_to_defaults(self):
         """重設所有值為預設值"""
@@ -1285,6 +1373,12 @@ class ConfigDialog(QDialog):
         self.cfg["RING_REFINE_WINDOW"] = self.ring_refine_window_spin.value()
         self.cfg["RING_TEMPLATE_CONFIDENCE"] = self.ring_template_conf_slider.value() / 100.0
         
+        # 圖標增強檢測設定
+        self.cfg["ICON_ENHANCED_DETECTION"] = self.icon_enhanced_enabled_checkbox.isChecked()
+        self.cfg["ICON_MASK_ALPHA"] = self.icon_mask_alpha_slider.value() / 100.0
+        self.cfg["ICON_ENHANCED_CONFIDENCE"] = self.icon_enhanced_conf_slider.value() / 100.0
+        self.cfg["ICON_RATIO_THRESHOLD"] = self.icon_ratio_threshold_slider.value() / 100.0
+        
         return self.cfg
 
 # ==========================
@@ -1303,7 +1397,133 @@ class ImageDetector:
             raise ValueError(f"無法載入圖片: {template_path}")
         self.template_width, self.template_height = self.template_img.shape[::-1]
 
-    def find_image_with_scaling(self):
+    def build_icon_masks(self, tmpl_bgr):
+        """從模板自動產生 mask：保留白色對話框 + 青藍光圈；排除紅色驚嘆號"""
+        tmpl_hsv = cv2.cvtColor(tmpl_bgr, cv2.COLOR_BGR2HSV)
+
+        # 白色（對話框氣泡）
+        white = cv2.inRange(tmpl_hsv, (0, 0, 200), (179, 40, 255))
+
+        # 青藍（圖示底座與無線電波）
+        cyan1 = cv2.inRange(tmpl_hsv, (85, 60, 120), (105, 255, 255))   # H 近似藍綠
+        cyan2 = cv2.inRange(tmpl_hsv, (100, 40, 120), (125, 255, 255))  # 擴一點上界
+        cyan = cv2.bitwise_or(cyan1, cyan2)
+
+        # 排除紅色（右上驚嘆號）
+        red1 = cv2.inRange(tmpl_hsv, (0, 80, 80), (10, 255, 255))
+        red2 = cv2.inRange(tmpl_hsv, (170, 80, 80), (179, 255, 255))
+        red = cv2.bitwise_or(red1, red2)
+
+        keep = cv2.bitwise_or(white, cyan)
+        keep = cv2.morphologyEx(keep, cv2.MORPH_CLOSE, np.ones((3,3), np.uint8), iterations=1)
+
+        # 把紅色區域挖洞
+        red = cv2.morphologyEx(red, cv2.MORPH_DILATE, np.ones((3,3), np.uint8), iterations=1)
+        keep[red > 0] = 0
+
+        return keep  # 單通道 8U，0=忽略，>0=納入比對
+
+    def find_icon_enhanced(self, cfg=None, scale_range=None, scale_steps=None):
+        """
+        增強版圖標檢測：使用智能遮罩 + 多重比對融合
+        回傳：(top_left_xy_global, best_scale, score) 或 (None, None, None)
+        """
+        if cfg is None:
+            cfg = DEFAULT_CFG
+            
+        if scale_range is None:
+            scale_range = self.scale_range
+        if scale_steps is None:
+            scale_steps = self.scale_steps
+            
+        # 從配置獲取參數
+        alpha = cfg.get("ICON_MASK_ALPHA", 0.5)
+        conf = cfg.get("ICON_ENHANCED_CONFIDENCE", 0.84)
+        ratio_thresh = cfg.get("ICON_RATIO_THRESHOLD", 1.12)
+            
+        rx, ry, rw, rh = map(int, self.search_region)
+
+        try:
+            # 擷取搜尋區
+            shot = pyautogui.screenshot(region=(rx, ry, rw, rh))
+            img_rgb = np.array(shot)
+            if img_rgb.size == 0:
+                return None, None, None
+
+            # 準備比對素材
+            img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+            img_edge = cv2.Canny(img_gray, 50, 150)
+
+            # 讀取彩色模板（用於遮罩生成）
+            tmpl_bgr = cv2.imread(self.template_path, cv2.IMREAD_COLOR)
+            if tmpl_bgr is None:
+                # 回退到傳統方法
+                return self.find_image_with_scaling_original()
+                
+            tmpl_gray = cv2.cvtColor(tmpl_bgr, cv2.COLOR_BGR2GRAY)
+            tmpl_edge = cv2.Canny(tmpl_gray, 50, 150)
+            mask0     = self.build_icon_masks(tmpl_bgr)
+
+            th, tw = tmpl_gray.shape[:2]
+            H, W   = img_gray.shape[:2]
+
+            best_score = -1.0
+            second_best = -1.0
+            best_loc = None
+            best_scale = None
+
+            for s in np.linspace(scale_range[0], scale_range[1], scale_steps):
+                w = max(1, int(round(tw * s)))
+                h = max(1, int(round(th * s)))
+                if h > H or w > W:
+                    continue
+
+                try:
+                    t_gray = cv2.resize(tmpl_gray, (w, h), interpolation=cv2.INTER_AREA)
+                    t_edge = cv2.resize(tmpl_edge, (w, h), interpolation=cv2.INTER_NEAREST)
+                    t_mask = cv2.resize(mask0,     (w, h), interpolation=cv2.INTER_NEAREST)
+
+                    # A) 灰階+遮罩
+                    res1 = cv2.matchTemplate(img_gray, t_gray, cv2.TM_CCORR_NORMED, mask=t_mask)
+                    _, s1, _, loc1 = cv2.minMaxLoc(res1)
+
+                    # B) 邊緣
+                    res2 = cv2.matchTemplate(img_edge, t_edge, cv2.TM_CCOEFF_NORMED)
+                    _, s2, _, loc2 = cv2.minMaxLoc(res2)
+
+                    # 融合
+                    score = alpha * s1 + (1.0 - alpha) * s2
+                    loc   = loc1 if s1 >= s2 else loc2
+
+                    if score > best_score:
+                        second_best = best_score
+                        best_score  = score
+                        best_loc    = (loc[0] + rx, loc[1] + ry)
+                        best_scale  = s
+                    elif score > second_best:
+                        second_best = score
+                        
+                except cv2.error as e:
+                    print(f"[警告] 圖標增強檢測比對失敗 (scale={s:.2f}): {e}")
+                    continue
+
+            if best_loc is None:
+                return None, None, None
+
+            # 置信度驗證
+            ratio_ok = (best_score / max(1e-6, second_best)) >= ratio_thresh
+            if best_score >= conf and ratio_ok:
+                print(f"[增強圖標檢測] 成功：分數={best_score:.3f}, 比例={best_score/max(1e-6, second_best):.2f}")
+                return best_loc, best_scale, best_score
+                
+            print(f"[增強圖標檢測] 未通過驗證：分數={best_score:.3f}, 比例={best_score/max(1e-6, second_best):.2f}")
+            return None, None, None
+            
+        except Exception as e:
+            print(f"[錯誤] 增強圖標檢測異常: {e}")
+            return None, None, None
+
+    def find_image_with_scaling_original(self):
         scale_steps = self.scale_steps
         scale_range = self.scale_range
         screenshot = pyautogui.screenshot(region=self.search_region)
@@ -1331,6 +1551,33 @@ class ImageDetector:
             return found_location, best_scale
         else:
             return None, None
+
+    def find_image_with_scaling(self, cfg=None, use_enhanced=None, fallback_to_original=True):
+        """
+        主要的圖標檢測方法：優先使用增強版檢測，失敗時可回退到傳統方法
+        """
+        if cfg is None:
+            cfg = DEFAULT_CFG
+            
+        if use_enhanced is None:
+            use_enhanced = cfg.get("ICON_ENHANCED_DETECTION", True)
+            
+        if use_enhanced:
+            try:
+                result = self.find_icon_enhanced(cfg)
+                if result[0] is not None:
+                    return result[0], result[1]  # 返回 (location, scale) 格式
+                else:
+                    print("[增強圖標檢測] 未找到結果")
+            except Exception as e:
+                print(f"[增強圖標檢測] 異常: {e}")
+        
+        # 增強檢測失敗，回退到傳統方法
+        if fallback_to_original:
+            print("[增強圖標檢測] 回退到傳統模板匹配")
+            return self.find_image_with_scaling_original()
+        
+        return None, None
 
     def get_center_position(self, location, scale):
         if location and scale:
@@ -2385,7 +2632,7 @@ class DetectorWorker(QThread):
                 continue
 
             # 尋找目標圖標
-            location, scale = icon.find_image_with_scaling()
+            location, scale = icon.find_image_with_scaling(self.cfg)
             if location and scale:
                 # 更新 Discord 通知器的檢測時間
                 self.discord_notifier.update_detection_time()
@@ -2399,7 +2646,7 @@ class DetectorWorker(QThread):
                 attempts = 0
                 while attempts < self.cfg["MAX_ARROW_ATTEMPTS"] and self._pause_ev.is_set() and not self._stop_ev.is_set():
                     # 圖標是否還在
-                    current_location, current_scale = icon.find_image_with_scaling()
+                    current_location, current_scale = icon.find_image_with_scaling(self.cfg)
                     if not current_location:
                         if not icon_lost_logged:
                             self._log("目標圖標消失，回到搜尋。")
@@ -2474,7 +2721,7 @@ class DetectorWorker(QThread):
         try:
             # 圖標是否還在
             try:
-                current_location, current_scale = icon.find_image_with_scaling()
+                current_location, current_scale = icon.find_image_with_scaling(self.cfg)
             except Exception as e:
                 print(f"[警告] 圖標偵測異常: {e}")
                 return False
