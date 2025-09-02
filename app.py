@@ -72,12 +72,6 @@ DEFAULT_CFG = {
     "ICON_SCALE_STEPS": 7,
     "CHARACTER_SCALE_RANGE": [0.8, 1.2],
     "CHARACTER_SCALE_STEPS": 7,
-    
-    # 邊緣檢測參數
-    "USE_EDGE_DETECTION": True,           # 是否啟用邊緣檢測
-    "EDGE_CANNY_LOW": 50,                # Canny 低閾值
-    "EDGE_CANNY_HIGH": 150,              # Canny 高閾值
-    "EDGE_GAUSSIAN_KERNEL": 3,           # 高斯模糊核大小
 
     # 箭頭/拖曳
     "ARROW_SEARCH_RADIUS": 140,
@@ -104,6 +98,22 @@ DEFAULT_CFG = {
     "DRAG_HOLD_MAX": 5.0,          # 最長握住時間（秒）＝方向很準時就多走一些
     "DRAG_SESSION_MAX": 6.0,        # 單次導航上限秒數（安全網）
     "ANGLE_OK_STD": 12.0,           # 視為角度穩定的環向標準差（度）→ 可提前持續拖曳
+    
+    # 圓環檢測參數（增強版人物檢測）
+    "RING_DETECTION_ENABLED": True,     # 是否啟用圓環檢測
+    "RING_CIRCLE_R_MIN": 18,            # 圓環最小半徑
+    "RING_CIRCLE_R_MAX": 40,            # 圓環最大半徑
+    "RING_WHITE_V_THRESH": 200,         # 白色亮度閾值
+    "RING_WHITE_S_MAX": 60,             # 白色飽和度最大值
+    "RING_CONSISTENCY": 0.55,           # 圓周白色比例閾值
+    "RING_REFINE_WINDOW": 120,          # 模板驗證窗口大小
+    "RING_TEMPLATE_CONFIDENCE": 0.82,   # 模板二次驗證閾值
+    
+    # 圖標增強檢測參數
+    "ICON_ENHANCED_DETECTION": True,    # 是否啟用圖標增強檢測
+    "ICON_MASK_ALPHA": 0.5,             # 灰階+遮罩 與 邊緣 的融合權重
+    "ICON_RATIO_THRESHOLD": 1.12,       # 最佳/次佳 比例門檻
+    "ICON_ENHANCED_CONFIDENCE": 0.84,   # 增強檢測信心度閾值
     "ANGLE_RELOCK_STD": 25.0,       # 角度發散時「重新鎖定」的門檻（度），高於此值暫停拖
     "ANGLE_ABORT_DEG": 60.0,        # 與上次方向差超過此角度則視為大幅偏離，停止這輪
     "ANGLE_SMOOTH_ALPHA": 0.35,     # 角度 EMA 平滑係數（0~1）
@@ -152,166 +162,18 @@ DEFAULT_CFG = {
 CFG_PATH = config_file_path("config.json")
 
 def load_cfg():
-    """載入配置文件，具備完整的向後兼容性支持"""
     cfg_path = config_file_path("config.json")
-    
     if os.path.exists(cfg_path):
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
-        except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            print(f"[警告] 配置文件格式錯誤: {e}")
-            print(f"[警告] 使用預設配置並備份原檔案")
-            backup_invalid_config(cfg_path)
-            return DEFAULT_CFG.copy()
-        except Exception as e:
-            print(f"[警告] 無法讀取配置文件: {e}")
-            print(f"[警告] 使用預設配置")
-            return DEFAULT_CFG.copy()
-        
-        # 向後兼容性處理
-        updated_items = []
-        type_corrected_items = []
-        
-        # 檢查並補充缺失的配置項目
-        for key, default_value in DEFAULT_CFG.items():
-            if key not in data:
-                data[key] = default_value
-                updated_items.append(key)
-            else:
-                # 類型檢查和自動修正
-                old_value = data[key]
-                corrected_value = validate_and_correct_type(key, old_value, default_value)
-                if corrected_value != old_value:
-                    data[key] = corrected_value
-                    type_corrected_items.append((key, old_value, corrected_value))
-        
-        # 移除不再使用的配置項目（可選）
-        removed_items = []
-        if "REMOVE_DEPRECATED_KEYS" in data and data["REMOVE_DEPRECATED_KEYS"]:
-            deprecated_keys = get_deprecated_keys()
-            for key in list(data.keys()):
-                if key in deprecated_keys:
-                    removed_items.append(key)
-                    del data[key]
-        
-        # 記錄兼容性處理結果
-        if updated_items or type_corrected_items or removed_items:
-            print(f"[配置兼容性] 處理舊版配置文件:")
-            
-            if updated_items:
-                print(f"  ✅ 新增 {len(updated_items)} 項配置: {', '.join(updated_items)}")
-            
-            if type_corrected_items:
-                print(f"  🔧 修正 {len(type_corrected_items)} 項類型:")
-                for key, old_val, new_val in type_corrected_items:
-                    print(f"    - {key}: {old_val} → {new_val}")
-            
-            if removed_items:
-                print(f"  🗑️  移除 {len(removed_items)} 項廢棄配置: {', '.join(removed_items)}")
-            
-            # 自動保存更新後的配置
-            try:
-                save_cfg(data)
-                print(f"  💾 配置已自動更新並保存")
-            except Exception as e:
-                print(f"  ⚠️  配置保存失敗: {e}")
-        
+        with open(cfg_path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        # 舊檔案補缺欄
+        for k,v in DEFAULT_CFG.items():
+            if k not in data:
+                data[k] = v
         return data
-    else:
-        print(f"[配置] 未找到配置文件，創建預設配置")
-        default_cfg = DEFAULT_CFG.copy()
-        try:
-            save_cfg(default_cfg)
-            print(f"[配置] 預設配置已保存到: {cfg_path}")
-        except Exception as e:
-            print(f"[警告] 無法保存預設配置: {e}")
-        return default_cfg
-
-def validate_and_correct_type(key, value, default_value):
-    """驗證並修正配置值的類型"""
-    if default_value is None:
-        return value
-    
-    expected_type = type(default_value)
-    
-    # 如果類型匹配，直接返回
-    if isinstance(value, expected_type):
-        return value
-    
-    # 嘗試類型轉換
-    try:
-        if expected_type == bool:
-            # 布林值特殊處理
-            if isinstance(value, str):
-                return value.lower() in ('true', '1', 'yes', 'on', 'enabled')
-            return bool(value)
-        
-        elif expected_type == int:
-            return int(float(value))  # 先轉float再轉int，避免"1.0"格式問題
-        
-        elif expected_type == float:
-            return float(value)
-        
-        elif expected_type == str:
-            return str(value)
-        
-        elif expected_type == list:
-            if isinstance(value, str):
-                # 嘗試解析字符串形式的列表
-                import ast
-                return ast.literal_eval(value)
-            return list(value)
-        
-        elif expected_type == dict:
-            if isinstance(value, str):
-                import ast
-                return ast.literal_eval(value)
-            return dict(value)
-        
-        else:
-            # 未知類型，返回默認值
-            print(f"[警告] 配置項 {key} 的值 {value} 無法轉換為預期類型 {expected_type}")
-            return default_value
-            
-    except (ValueError, TypeError, SyntaxError) as e:
-        print(f"[警告] 配置項 {key} 類型轉換失敗: {e}，使用預設值")
-        return default_value
-
-def get_deprecated_keys():
-    """獲取已廢棄的配置鍵列表"""
-    return [
-        # 在這裡添加不再使用的配置鍵
-        # 例如: "OLD_PARAMETER_NAME", "DEPRECATED_SETTING"
-    ]
-
-def backup_invalid_config(cfg_path):
-    """備份無效的配置文件"""
-    try:
-        import shutil
-        from datetime import datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        backup_path = f"{cfg_path}.backup_{timestamp}"
-        shutil.copy2(cfg_path, backup_path)
-        print(f"[備份] 原配置文件已備份至: {backup_path}")
-    except Exception as e:
-        print(f"[警告] 無法備份配置文件: {e}")
-
-def save_cfg_with_backup(cfg, cfg_path):
-    """保存配置文件，先創建備份"""
-    if os.path.exists(cfg_path):
-        try:
-            import shutil
-            backup_path = f"{cfg_path}.bak"
-            shutil.copy2(cfg_path, backup_path)
-        except Exception as e:
-            print(f"[警告] 無法創建配置備份: {e}")
-    
-    with open(cfg_path, "w", encoding="utf-8") as f:
-        json.dump(cfg, f, ensure_ascii=False, indent=2)
+    return DEFAULT_CFG.copy()
 
 def save_cfg(cfg):
-    """保存配置文件（原有函數保持不變）"""
     cfg_path = config_file_path("config.json")
     with open(cfg_path, "w", encoding="utf-8") as f:
         json.dump(cfg, f, ensure_ascii=False, indent=2)
@@ -370,7 +232,7 @@ class DiscordNotifier:
                 "title": "🔍 圖標檢測警告",
                 "description": f"已經 **{minutes}分{seconds}秒** 沒有檢測到目標圖標！",
                 "color": 0xff6b6b,  # 紅色
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.utcnow().isoformat() + "Z",  # 使用 UTC 時間
                 "fields": [
                     {
                         "name": "⏰ 最後檢測時間",
@@ -421,7 +283,7 @@ class DiscordNotifier:
                 "title": "✅ 測試通知",
                 "description": "這是一個測試通知，確認 Webhook 設定正確！",
                 "color": 0x00ff00,  # 綠色
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": datetime.utcnow().isoformat() + "Z",  # 使用 UTC 時間
                 "fields": [
                     {
                         "name": "📍 測試頻道",
@@ -672,106 +534,6 @@ class ConfigDialog(QDialog):
         character_scale_layout.addWidget(QLabel("最大:"))
         character_scale_layout.addWidget(self.character_scale_max_spin)
         detection_layout.addRow("人物縮放範圍:", character_scale_layout)
-        
-        # 邊緣檢測設定
-        detection_layout.addRow("", QLabel())  # 分隔線
-        edge_label = QLabel("邊緣檢測設定:")
-        edge_label.setStyleSheet("font-weight: bold; color: #0066cc;")
-        detection_layout.addRow(edge_label)
-        
-        # 啟用邊緣檢測
-        self.use_edge_detection_checkbox = QCheckBox("啟用邊緣檢測 (提高準確度)")
-        self.use_edge_detection_checkbox.setChecked(self.cfg.get("USE_EDGE_DETECTION", True))
-        self.use_edge_detection_checkbox.setToolTip(
-            "結合邊緣檢測與灰階匹配，提升圖像識別準確度\n\n"
-            "調優指南：\n"
-            "✅ 複雜背景環境 → 建議啟用 (提升30%準確度)\n"
-            "🌅 光照變化場景 → 建議啟用 (穩定性更佳)\n"
-            "🎯 精確邊界需求 → 建議啟用 (邊緣更清晰)\n"
-            "⚡ 簡單背景環境 → 可選停用 (節省運算)\n\n"
-            "說明：啟用後會結合兩種檢測方法\n"
-            "• 邊緣檢測：適用於邊緣清晰的圖像\n"
-            "• 灰階匹配：適用於色彩變化明顯的圖像\n"
-            "• 混合模式：平衡準確度與穩定性 (預設70%權重)"
-        )
-        detection_layout.addRow("", self.use_edge_detection_checkbox)
-        
-        # Canny 低閾值
-        self.edge_canny_low_spin = QSpinBox()
-        self.edge_canny_low_spin.setRange(10, 100)
-        self.edge_canny_low_spin.setValue(self.cfg.get("EDGE_CANNY_LOW", 50))
-        self.edge_canny_low_spin.setToolTip(
-            "Canny 邊緣檢測的低閾值 (建議: 30-70)\n\n"
-            "調優指南：\n"
-            "🔍 漏檢太多 → 降低數值 (例: 50→30)\n"
-            "❌ 誤判太多 → 提高數值 (例: 50→70)\n"
-            "⚖️ 平衡設定 → 使用預設值 50\n\n"
-            "說明：控制邊緣檢測的敏感度下限\n"
-            "數值越低越容易檢測到邊緣，但也容易產生噪音"
-        )
-        detection_layout.addRow("Canny 低閾值:", self.edge_canny_low_spin)
-        
-        # Canny 高閾值
-        self.edge_canny_high_spin = QSpinBox()
-        self.edge_canny_high_spin.setRange(50, 300)
-        self.edge_canny_high_spin.setValue(self.cfg.get("EDGE_CANNY_HIGH", 150))
-        self.edge_canny_high_spin.setToolTip(
-            "Canny 邊緣檢測的高閾值 (建議: 100-200)\n\n"
-            "調優指南：\n"
-            "🔍 漏檢太多 → 降低數值 (例: 150→100)\n"
-            "❌ 誤判太多 → 提高數值 (例: 150→200)\n"
-            "⚖️ 平衡設定 → 使用預設值 150\n\n"
-            "說明：控制邊緣檢測的敏感度上限\n"
-            "數值越高越只檢測強邊緣，過低會遺漏重要邊緣\n"
-            "建議高閾值是低閾值的 2-3 倍"
-        )
-        detection_layout.addRow("Canny 高閾值:", self.edge_canny_high_spin)
-        
-        # 高斯核大小
-        self.edge_gaussian_kernel_spin = QSpinBox()
-        self.edge_gaussian_kernel_spin.setRange(1, 9)
-        self.edge_gaussian_kernel_spin.setSingleStep(2)
-        self.edge_gaussian_kernel_spin.setValue(self.cfg.get("EDGE_GAUSSIAN_KERNEL", 3))
-        self.edge_gaussian_kernel_spin.setToolTip(
-            "高斯模糊核心大小 (建議: 3-7，必須為奇數)\n\n"
-            "調優指南：\n"
-            "🔧 圖像噪音多 → 增加數值 (例: 3→5→7)\n"
-            "📏 需要精細邊緣 → 減少數值 (例: 5→3)\n"
-            "⚖️ 一般使用 → 使用預設值 3\n\n"
-            "說明：邊緣檢測前的模糊處理程度\n"
-            "• 1: 無模糊，保留所有細節但容易有噪音\n"
-            "• 3: 輕微模糊，平衡細節與噪音 (推薦)\n"
-            "• 5-7: 較強模糊，適用於高噪音圖像\n"
-            "• 9: 強模糊，可能會遺漏細節"
-        )
-        detection_layout.addRow("高斯核大小:", self.edge_gaussian_kernel_spin)
-        
-        # 邊緣檢測權重
-        self.edge_detection_weight_slider = QSlider(Qt.Horizontal)
-        self.edge_detection_weight_slider.setRange(10, 90)  # 0.1 到 0.9
-        weight_value = int(self.cfg.get("EDGE_DETECTION_WEIGHT", 0.7) * 100)
-        self.edge_detection_weight_slider.setValue(weight_value)
-        self.edge_detection_weight_label = QLabel()
-        self.edge_detection_weight_slider.valueChanged.connect(self._update_edge_weight_label)
-        self._update_edge_weight_label()  # 初始化標籤
-        
-        self.edge_detection_weight_slider.setToolTip(
-            "邊緣檢測與灰階匹配的權重比例 (建議: 60-80%)\n\n"
-            "調優指南：\n"
-            "🎯 邊緣清晰的圖像 → 提高比例 (例: 70%→80%)\n"
-            "🌫️ 邊緣模糊的圖像 → 降低比例 (例: 70%→60%)\n"
-            "⚖️ 混合場景 → 使用預設值 70%\n\n"
-            "說明：\n"
-            "• 100% = 純邊緣檢測，適用於邊緣非常清晰的圖像\n"
-            "• 70% = 混合模式 (推薦)，平衡準確度與穩定性\n"
-            "• 50% = 平衡模式，適用於邊緣不明顯的圖像\n"
-            "• 30% = 偏向灰階，適用於邊緣檢測效果不佳時"
-        )
-        
-        edge_weight_layout = QHBoxLayout()
-        edge_weight_layout.addWidget(self.edge_detection_weight_slider)
-        edge_weight_layout.addWidget(self.edge_detection_weight_label)
-        detection_layout.addRow("邊緣檢測權重:", edge_weight_layout)
         
         tabs.addTab(detection_tab, "偵測參數")
         
@@ -1117,6 +879,167 @@ class ConfigDialog(QDialog):
         
         tabs.addTab(advanced_tab, "高級設定")
         
+        # 圓環檢測標籤頁（增強版人物檢測）
+        ring_tab = QWidget()
+        ring_layout = QFormLayout(ring_tab)
+        
+        # 啟用圓環檢測
+        self.ring_detection_enabled_checkbox = QCheckBox("啟用圓環檢測（增強版人物檢測）")
+        self.ring_detection_enabled_checkbox.setChecked(self.cfg.get("RING_DETECTION_ENABLED", True))
+        ring_layout.addRow("", self.ring_detection_enabled_checkbox)
+        
+        # 圓環半徑範圍
+        self.ring_r_min_spin = QSpinBox()
+        self.ring_r_min_spin.setRange(5, 50)
+        self.ring_r_min_spin.setValue(self.cfg.get("RING_CIRCLE_R_MIN", 18))
+        ring_layout.addRow("圓環最小半徑(像素):", self.ring_r_min_spin)
+        
+        self.ring_r_max_spin = QSpinBox()
+        self.ring_r_max_spin.setRange(20, 100)
+        self.ring_r_max_spin.setValue(self.cfg.get("RING_CIRCLE_R_MAX", 40))
+        ring_layout.addRow("圓環最大半徑(像素):", self.ring_r_max_spin)
+        
+        # 白色檢測參數
+        ring_layout.addRow("", QLabel())
+        white_label = QLabel("白色檢測參數:")
+        white_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        ring_layout.addRow(white_label)
+        
+        # 白色亮度閾值
+        self.ring_white_v_slider = QSlider(Qt.Horizontal)
+        self.ring_white_v_slider.setRange(150, 255)
+        self.ring_white_v_slider.setValue(self.cfg.get("RING_WHITE_V_THRESH", 200))
+        self.ring_white_v_label = QLabel()
+        self.ring_white_v_slider.valueChanged.connect(self._update_ring_white_v_label)
+        
+        white_v_layout = QHBoxLayout()
+        white_v_layout.addWidget(self.ring_white_v_slider)
+        white_v_layout.addWidget(self.ring_white_v_label)
+        ring_layout.addRow("白色亮度閾值:", white_v_layout)
+        
+        # 白色飽和度最大值
+        self.ring_white_s_slider = QSlider(Qt.Horizontal)
+        self.ring_white_s_slider.setRange(30, 120)
+        self.ring_white_s_slider.setValue(self.cfg.get("RING_WHITE_S_MAX", 60))
+        self.ring_white_s_label = QLabel()
+        self.ring_white_s_slider.valueChanged.connect(self._update_ring_white_s_label)
+        
+        white_s_layout = QHBoxLayout()
+        white_s_layout.addWidget(self.ring_white_s_slider)
+        white_s_layout.addWidget(self.ring_white_s_label)
+        ring_layout.addRow("白色飽和度上限:", white_s_layout)
+        
+        # 圓環一致性閾值
+        self.ring_consistency_slider = QSlider(Qt.Horizontal)
+        self.ring_consistency_slider.setRange(30, 90)
+        self.ring_consistency_slider.setValue(int(self.cfg.get("RING_CONSISTENCY", 0.55) * 100))
+        self.ring_consistency_label = QLabel()
+        self.ring_consistency_slider.valueChanged.connect(self._update_ring_consistency_label)
+        
+        consistency_layout = QHBoxLayout()
+        consistency_layout.addWidget(self.ring_consistency_slider)
+        consistency_layout.addWidget(self.ring_consistency_label)
+        ring_layout.addRow("圓周白色比例閾值:", consistency_layout)
+        
+        # 模板驗證參數
+        ring_layout.addRow("", QLabel())
+        template_label = QLabel("模板二次驗證:")
+        template_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        ring_layout.addRow(template_label)
+        
+        # 驗證窗口大小
+        self.ring_refine_window_spin = QSpinBox()
+        self.ring_refine_window_spin.setRange(60, 200)
+        self.ring_refine_window_spin.setValue(self.cfg.get("RING_REFINE_WINDOW", 120))
+        ring_layout.addRow("驗證窗口大小(像素):", self.ring_refine_window_spin)
+        
+        # 模板驗證信心度
+        self.ring_template_conf_slider = QSlider(Qt.Horizontal)
+        self.ring_template_conf_slider.setRange(60, 95)
+        self.ring_template_conf_slider.setValue(int(self.cfg.get("RING_TEMPLATE_CONFIDENCE", 0.82) * 100))
+        self.ring_template_conf_label = QLabel()
+        self.ring_template_conf_slider.valueChanged.connect(self._update_ring_template_conf_label)
+        
+        template_conf_layout = QHBoxLayout()
+        template_conf_layout.addWidget(self.ring_template_conf_slider)
+        template_conf_layout.addWidget(self.ring_template_conf_label)
+        ring_layout.addRow("模板驗證信心度:", template_conf_layout)
+        
+        # 添加說明
+        ring_layout.addRow("", QLabel())
+        ring_help_label = QLabel("💡 圓環檢測：先找人物腳下的白色圓環，再用模板驗證，提高檢測速度和精度")
+        ring_help_label.setStyleSheet("color: #666; font-size: 10px;")
+        ring_help_label.setWordWrap(True)
+        ring_layout.addRow("", ring_help_label)
+        
+        tabs.addTab(ring_tab, "圓環檢測")
+        
+        # 圖標增強檢測標籤頁
+        icon_enhanced_tab = QWidget()
+        icon_enhanced_layout = QFormLayout(icon_enhanced_tab)
+        
+        # 啟用圖標增強檢測
+        self.icon_enhanced_enabled_checkbox = QCheckBox("啟用圖標增強檢測（智能遮罩+多重比對）")
+        self.icon_enhanced_enabled_checkbox.setChecked(self.cfg.get("ICON_ENHANCED_DETECTION", True))
+        icon_enhanced_layout.addRow("", self.icon_enhanced_enabled_checkbox)
+        
+        # 融合權重參數
+        icon_enhanced_layout.addRow("", QLabel())
+        fusion_label = QLabel("融合權重參數:")
+        fusion_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        icon_enhanced_layout.addRow(fusion_label)
+        
+        # 遮罩與邊緣融合權重
+        self.icon_mask_alpha_slider = QSlider(Qt.Horizontal)
+        self.icon_mask_alpha_slider.setRange(0, 100)
+        self.icon_mask_alpha_slider.setValue(int(self.cfg.get("ICON_MASK_ALPHA", 0.5) * 100))
+        self.icon_mask_alpha_label = QLabel()
+        self.icon_mask_alpha_slider.valueChanged.connect(self._update_icon_mask_alpha_label)
+        
+        mask_alpha_layout = QHBoxLayout()
+        mask_alpha_layout.addWidget(self.icon_mask_alpha_slider)
+        mask_alpha_layout.addWidget(self.icon_mask_alpha_label)
+        icon_enhanced_layout.addRow("遮罩權重（vs邊緣）:", mask_alpha_layout)
+        
+        # 置信度參數
+        icon_enhanced_layout.addRow("", QLabel())
+        confidence_label = QLabel("置信度參數:")
+        confidence_label.setStyleSheet("font-weight: bold; color: #0066cc;")
+        icon_enhanced_layout.addRow(confidence_label)
+        
+        # 增強檢測信心度
+        self.icon_enhanced_conf_slider = QSlider(Qt.Horizontal)
+        self.icon_enhanced_conf_slider.setRange(70, 95)
+        self.icon_enhanced_conf_slider.setValue(int(self.cfg.get("ICON_ENHANCED_CONFIDENCE", 0.84) * 100))
+        self.icon_enhanced_conf_label = QLabel()
+        self.icon_enhanced_conf_slider.valueChanged.connect(self._update_icon_enhanced_conf_label)
+        
+        enhanced_conf_layout = QHBoxLayout()
+        enhanced_conf_layout.addWidget(self.icon_enhanced_conf_slider)
+        enhanced_conf_layout.addWidget(self.icon_enhanced_conf_label)
+        icon_enhanced_layout.addRow("增強檢測信心度:", enhanced_conf_layout)
+        
+        # 比例門檻
+        self.icon_ratio_threshold_slider = QSlider(Qt.Horizontal)
+        self.icon_ratio_threshold_slider.setRange(105, 150)
+        self.icon_ratio_threshold_slider.setValue(int(self.cfg.get("ICON_RATIO_THRESHOLD", 1.12) * 100))
+        self.icon_ratio_threshold_label = QLabel()
+        self.icon_ratio_threshold_slider.valueChanged.connect(self._update_icon_ratio_threshold_label)
+        
+        ratio_threshold_layout = QHBoxLayout()
+        ratio_threshold_layout.addWidget(self.icon_ratio_threshold_slider)
+        ratio_threshold_layout.addWidget(self.icon_ratio_threshold_label)
+        icon_enhanced_layout.addRow("最佳/次佳比例門檻:", ratio_threshold_layout)
+        
+        # 添加說明
+        icon_enhanced_layout.addRow("", QLabel())
+        icon_enhanced_help_label = QLabel("💡 智能遮罩檢測：自動識別關鍵特徵（白色對話框、青藍光圈），排除干擾（紅色驚嘆號）")
+        icon_enhanced_help_label.setStyleSheet("color: #666; font-size: 10px;")
+        icon_enhanced_help_label.setWordWrap(True)
+        icon_enhanced_layout.addRow("", icon_enhanced_help_label)
+        
+        tabs.addTab(icon_enhanced_tab, "圖標增強檢測")
+        
         # Discord 通知標籤頁
         discord_tab = QWidget()
         discord_layout = QFormLayout(discord_tab)
@@ -1203,6 +1126,15 @@ class ConfigDialog(QDialog):
         self._update_arrow_radius_label()
         self._update_arrow_min_area_label()
         self._update_drag_distance_label()
+        # 圓環檢測標籤初始化
+        self._update_ring_white_v_label()
+        self._update_ring_white_s_label()
+        self._update_ring_consistency_label()
+        self._update_ring_template_conf_label()
+        # 圖標增強檢測標籤初始化
+        self._update_icon_mask_alpha_label()
+        self._update_icon_enhanced_conf_label()
+        self._update_icon_ratio_threshold_label()
         
     def _update_icon_confidence_label(self):
         value = self.icon_confidence_slider.value() / 100.0
@@ -1223,13 +1155,34 @@ class ConfigDialog(QDialog):
     def _update_drag_distance_label(self):
         value = self.drag_distance_slider.value()
         self.drag_distance_label.setText(f"{value} px")
-        
-    def _update_edge_weight_label(self):
-        """更新邊緣檢測權重標籤"""
-        weight_percent = self.edge_detection_weight_slider.value()
-        weight_decimal = weight_percent / 100.0
-        gray_percent = 100 - weight_percent
-        self.edge_detection_weight_label.setText(f"{weight_percent}% / {gray_percent}%")
+    
+    def _update_ring_white_v_label(self):
+        value = self.ring_white_v_slider.value()
+        self.ring_white_v_label.setText(f"{value}")
+    
+    def _update_ring_white_s_label(self):
+        value = self.ring_white_s_slider.value()
+        self.ring_white_s_label.setText(f"{value}")
+    
+    def _update_ring_consistency_label(self):
+        value = self.ring_consistency_slider.value()
+        self.ring_consistency_label.setText(f"{value/100:.2f}")
+    
+    def _update_ring_template_conf_label(self):
+        value = self.ring_template_conf_slider.value()
+        self.ring_template_conf_label.setText(f"{value/100:.2f}")
+    
+    def _update_icon_mask_alpha_label(self):
+        value = self.icon_mask_alpha_slider.value()
+        self.icon_mask_alpha_label.setText(f"{value/100:.2f}")
+    
+    def _update_icon_enhanced_conf_label(self):
+        value = self.icon_enhanced_conf_slider.value()
+        self.icon_enhanced_conf_label.setText(f"{value/100:.2f}")
+    
+    def _update_icon_ratio_threshold_label(self):
+        value = self.icon_ratio_threshold_slider.value()
+        self.icon_ratio_threshold_label.setText(f"{value/100:.2f}")
         
     def _reset_to_defaults(self):
         """重設所有值為預設值"""
@@ -1244,13 +1197,6 @@ class ConfigDialog(QDialog):
         self.icon_scale_max_spin.setValue(DEFAULT_CFG["ICON_SCALE_RANGE"][1])
         self.character_scale_min_spin.setValue(DEFAULT_CFG["CHARACTER_SCALE_RANGE"][0])
         self.character_scale_max_spin.setValue(DEFAULT_CFG["CHARACTER_SCALE_RANGE"][1])
-        
-        # 邊緣檢測設定
-        self.use_edge_detection_checkbox.setChecked(DEFAULT_CFG["USE_EDGE_DETECTION"])
-        self.edge_canny_low_spin.setValue(DEFAULT_CFG["EDGE_CANNY_LOW"])
-        self.edge_canny_high_spin.setValue(DEFAULT_CFG["EDGE_CANNY_HIGH"])
-        self.edge_gaussian_kernel_spin.setValue(DEFAULT_CFG["EDGE_GAUSSIAN_KERNEL"])
-        self.edge_detection_weight_slider.setValue(int(DEFAULT_CFG["EDGE_DETECTION_WEIGHT"] * 100))
         
         # 箭頭偵測
         self.arrow_radius_slider.setValue(DEFAULT_CFG["ARROW_SEARCH_RADIUS"])
@@ -1354,13 +1300,6 @@ class ConfigDialog(QDialog):
         self.cfg["ICON_SCALE_RANGE"] = [self.icon_scale_min_spin.value(), self.icon_scale_max_spin.value()]
         self.cfg["CHARACTER_SCALE_RANGE"] = [self.character_scale_min_spin.value(), self.character_scale_max_spin.value()]
         
-        # 邊緣檢測設定
-        self.cfg["USE_EDGE_DETECTION"] = self.use_edge_detection_checkbox.isChecked()
-        self.cfg["EDGE_CANNY_LOW"] = self.edge_canny_low_spin.value()
-        self.cfg["EDGE_CANNY_HIGH"] = self.edge_canny_high_spin.value()
-        self.cfg["EDGE_GAUSSIAN_KERNEL"] = self.edge_gaussian_kernel_spin.value()
-        self.cfg["EDGE_DETECTION_WEIGHT"] = self.edge_detection_weight_slider.value() / 100.0
-        
         self.cfg["ARROW_SEARCH_RADIUS"] = self.arrow_radius_slider.value()
         self.cfg["ARROW_MIN_AREA"] = self.arrow_min_area_slider.value()
         self.cfg["ARROW_DETECTION_TIMEOUT"] = self.arrow_timeout_spin.value()
@@ -1424,133 +1363,221 @@ class ConfigDialog(QDialog):
             discord_channels[channel_name] = url_input.text().strip()
         self.cfg["DISCORD_CHANNELS"] = discord_channels
         
+        # 圓環檢測設定
+        self.cfg["RING_DETECTION_ENABLED"] = self.ring_detection_enabled_checkbox.isChecked()
+        self.cfg["RING_CIRCLE_R_MIN"] = self.ring_r_min_spin.value()
+        self.cfg["RING_CIRCLE_R_MAX"] = self.ring_r_max_spin.value()
+        self.cfg["RING_WHITE_V_THRESH"] = self.ring_white_v_slider.value()
+        self.cfg["RING_WHITE_S_MAX"] = self.ring_white_s_slider.value()
+        self.cfg["RING_CONSISTENCY"] = self.ring_consistency_slider.value() / 100.0
+        self.cfg["RING_REFINE_WINDOW"] = self.ring_refine_window_spin.value()
+        self.cfg["RING_TEMPLATE_CONFIDENCE"] = self.ring_template_conf_slider.value() / 100.0
+        
+        # 圖標增強檢測設定
+        self.cfg["ICON_ENHANCED_DETECTION"] = self.icon_enhanced_enabled_checkbox.isChecked()
+        self.cfg["ICON_MASK_ALPHA"] = self.icon_mask_alpha_slider.value() / 100.0
+        self.cfg["ICON_ENHANCED_CONFIDENCE"] = self.icon_enhanced_conf_slider.value() / 100.0
+        self.cfg["ICON_RATIO_THRESHOLD"] = self.icon_ratio_threshold_slider.value() / 100.0
+        
         return self.cfg
 
 # ==========================
 # 你的偵測類別（略微改為讀 cfg 變數）
 # ==========================
 class ImageDetector:
-    def __init__(self, template_path, search_region, confidence=0.8, scale_steps=7, scale_range=(0.8,1.2), use_edge_detection=True):
+    def __init__(self, template_path, search_region, confidence=0.8, scale_steps=7, scale_range=(0.8,1.2)):
         self.template_path = template_path
         self.search_region = tuple(search_region)
         self.confidence = confidence
         self.scale_steps = scale_steps
         self.scale_range = scale_range
-        self.use_edge_detection = use_edge_detection
 
         self.template_img = cv2.imread(template_path, 0)
         if self.template_img is None:
             raise ValueError(f"無法載入圖片: {template_path}")
         self.template_width, self.template_height = self.template_img.shape[::-1]
-        
-        # 預處理模板邊緣（如果啟用邊緣檢測）
-        if self.use_edge_detection:
-            self.template_edge = self._preprocess_edge(self.template_img)
 
-    def _preprocess_edge(self, image_gray, gaussian_kernel=3, canny_low=50, canny_high=150):
-        """邊緣預處理 - 針對人物和圖標優化"""
-        # 高斯模糊降噪
-        blurred = cv2.GaussianBlur(image_gray, (gaussian_kernel, gaussian_kernel), 0)
-        
-        # Canny 邊緣檢測
-        edges = cv2.Canny(blurred, canny_low, canny_high)
-        
-        # 形態學操作增強邊緣連接性
-        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2, 2))
-        edges = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel, iterations=1)
-        
-        return edges
+    def build_icon_masks(self, tmpl_bgr):
+        """從模板自動產生 mask：保留白色對話框 + 青藍光圈；排除紅色驚嘆號"""
+        tmpl_hsv = cv2.cvtColor(tmpl_bgr, cv2.COLOR_BGR2HSV)
 
-    def _hybrid_detection(self, screenshot_gray, scale):
-        """混合檢測：結合邊緣檢測和灰階匹配"""
-        # 調整模板大小
-        new_width = max(1, int(self.template_width * scale))
-        new_height = max(1, int(self.template_height * scale))
-        
-        if new_height > screenshot_gray.shape[0] or new_width > screenshot_gray.shape[1]:
-            return -1, (0, 0)
-        
-        edge_score = -1
-        gray_score = -1
-        edge_loc = (0, 0)
-        gray_loc = (0, 0)
-        
-        # 邊緣檢測匹配
-        if self.use_edge_detection:
-            try:
-                resized_edge = cv2.resize(self.template_edge, (new_width, new_height))
-                screenshot_edge = self._preprocess_edge(screenshot_gray)
-                
-                edge_result = cv2.matchTemplate(screenshot_edge, resized_edge, cv2.TM_CCOEFF_NORMED)
-                _, edge_score, _, edge_loc = cv2.minMaxLoc(edge_result)
-            except Exception as e:
-                print(f"[警告] 邊緣檢測失敗: {e}")
-                edge_score = -1
-        
-        # 灰階匹配 (作為輔助或備用)
-        try:
-            resized_gray = cv2.resize(self.template_img, (new_width, new_height))
-            gray_result = cv2.matchTemplate(screenshot_gray, resized_gray, cv2.TM_CCOEFF_NORMED)
-            _, gray_score, _, gray_loc = cv2.minMaxLoc(gray_result)
-        except Exception as e:
-            print(f"[警告] 灰階匹配失敗: {e}")
-            gray_score = -1
-        
-        # 選擇最佳結果
-        if self.use_edge_detection and edge_score > 0:
-            # 混合評分：邊緣檢測權重較高
-            if gray_score > 0:
-                combined_score = 0.7 * edge_score + 0.3 * gray_score
-            else:
-                combined_score = edge_score
+        # 白色（對話框氣泡）
+        white = cv2.inRange(tmpl_hsv, (0, 0, 200), (179, 40, 255))
+
+        # 青藍（圖示底座與無線電波）
+        cyan1 = cv2.inRange(tmpl_hsv, (85, 60, 120), (105, 255, 255))   # H 近似藍綠
+        cyan2 = cv2.inRange(tmpl_hsv, (100, 40, 120), (125, 255, 255))  # 擴一點上界
+        cyan = cv2.bitwise_or(cyan1, cyan2)
+
+        # 排除紅色（右上驚嘆號）
+        red1 = cv2.inRange(tmpl_hsv, (0, 80, 80), (10, 255, 255))
+        red2 = cv2.inRange(tmpl_hsv, (170, 80, 80), (179, 255, 255))
+        red = cv2.bitwise_or(red1, red2)
+
+        keep = cv2.bitwise_or(white, cyan)
+        keep = cv2.morphologyEx(keep, cv2.MORPH_CLOSE, np.ones((3,3), np.uint8), iterations=1)
+
+        # 把紅色區域挖洞
+        red = cv2.morphologyEx(red, cv2.MORPH_DILATE, np.ones((3,3), np.uint8), iterations=1)
+        keep[red > 0] = 0
+
+        return keep  # 單通道 8U，0=忽略，>0=納入比對
+
+    def find_icon_enhanced(self, cfg=None, scale_range=None, scale_steps=None):
+        """
+        增強版圖標檢測：使用智能遮罩 + 多重比對融合
+        回傳：(top_left_xy_global, best_scale, score) 或 (None, None, None)
+        """
+        if cfg is None:
+            cfg = DEFAULT_CFG
             
-            # 如果邊緣檢測結果可信，優先使用
-            if edge_score > gray_score * 0.8:
-                return combined_score, edge_loc
-            else:
-                return combined_score, gray_loc
-        else:
-            # 回退到純灰階匹配
-            return gray_score, gray_loc
+        if scale_range is None:
+            scale_range = self.scale_range
+        if scale_steps is None:
+            scale_steps = self.scale_steps
+            
+        # 從配置獲取參數
+        alpha = cfg.get("ICON_MASK_ALPHA", 0.5)
+        conf = cfg.get("ICON_ENHANCED_CONFIDENCE", 0.84)
+        ratio_thresh = cfg.get("ICON_RATIO_THRESHOLD", 1.12)
+            
+        rx, ry, rw, rh = map(int, self.search_region)
 
-    def find_image_with_scaling(self):
+        try:
+            # 擷取搜尋區
+            shot = pyautogui.screenshot(region=(rx, ry, rw, rh))
+            img_rgb = np.array(shot)
+            if img_rgb.size == 0:
+                return None, None, None
+
+            # 準備比對素材
+            img_gray = cv2.cvtColor(img_rgb, cv2.COLOR_RGB2GRAY)
+            img_edge = cv2.Canny(img_gray, 50, 150)
+
+            # 讀取彩色模板（用於遮罩生成）
+            tmpl_bgr = cv2.imread(self.template_path, cv2.IMREAD_COLOR)
+            if tmpl_bgr is None:
+                # 回退到傳統方法
+                return self.find_image_with_scaling_original()
+                
+            tmpl_gray = cv2.cvtColor(tmpl_bgr, cv2.COLOR_BGR2GRAY)
+            tmpl_edge = cv2.Canny(tmpl_gray, 50, 150)
+            mask0     = self.build_icon_masks(tmpl_bgr)
+
+            th, tw = tmpl_gray.shape[:2]
+            H, W   = img_gray.shape[:2]
+
+            best_score = -1.0
+            second_best = -1.0
+            best_loc = None
+            best_scale = None
+
+            for s in np.linspace(scale_range[0], scale_range[1], scale_steps):
+                w = max(1, int(round(tw * s)))
+                h = max(1, int(round(th * s)))
+                if h > H or w > W:
+                    continue
+
+                try:
+                    t_gray = cv2.resize(tmpl_gray, (w, h), interpolation=cv2.INTER_AREA)
+                    t_edge = cv2.resize(tmpl_edge, (w, h), interpolation=cv2.INTER_NEAREST)
+                    t_mask = cv2.resize(mask0,     (w, h), interpolation=cv2.INTER_NEAREST)
+
+                    # A) 灰階+遮罩
+                    res1 = cv2.matchTemplate(img_gray, t_gray, cv2.TM_CCORR_NORMED, mask=t_mask)
+                    _, s1, _, loc1 = cv2.minMaxLoc(res1)
+
+                    # B) 邊緣
+                    res2 = cv2.matchTemplate(img_edge, t_edge, cv2.TM_CCOEFF_NORMED)
+                    _, s2, _, loc2 = cv2.minMaxLoc(res2)
+
+                    # 融合
+                    score = alpha * s1 + (1.0 - alpha) * s2
+                    loc   = loc1 if s1 >= s2 else loc2
+
+                    if score > best_score:
+                        second_best = best_score
+                        best_score  = score
+                        best_loc    = (loc[0] + rx, loc[1] + ry)
+                        best_scale  = s
+                    elif score > second_best:
+                        second_best = score
+                        
+                except cv2.error as e:
+                    print(f"[警告] 圖標增強檢測比對失敗 (scale={s:.2f}): {e}")
+                    continue
+
+            if best_loc is None:
+                return None, None, None
+
+            # 置信度驗證
+            ratio_ok = (best_score / max(1e-6, second_best)) >= ratio_thresh
+            if best_score >= conf and ratio_ok:
+                print(f"[增強圖標檢測] 成功：分數={best_score:.3f}, 比例={best_score/max(1e-6, second_best):.2f}")
+                return best_loc, best_scale, best_score
+                
+            print(f"[增強圖標檢測] 未通過驗證：分數={best_score:.3f}, 比例={best_score/max(1e-6, second_best):.2f}")
+            return None, None, None
+            
+        except Exception as e:
+            print(f"[錯誤] 增強圖標檢測異常: {e}")
+            return None, None, None
+
+    def find_image_with_scaling_original(self):
         scale_steps = self.scale_steps
         scale_range = self.scale_range
-        
-        try:
-            screenshot = pyautogui.screenshot(region=self.search_region)
-            screenshot_np = np.array(screenshot)
-            screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
-        except Exception as e:
-            print(f"[錯誤] 截圖失敗: {e}")
-            return None, None
+        screenshot = pyautogui.screenshot(region=self.search_region)
+        screenshot_np = np.array(screenshot)
+        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
 
         found_location = None
         max_corr = -1
         best_scale = None
 
         for scale in np.linspace(scale_range[0], scale_range[1], scale_steps):
-            if self.use_edge_detection:
-                # 使用混合檢測
-                score, location = self._hybrid_detection(screenshot_gray, scale)
-            else:
-                # 傳統灰階匹配
-                w, h = self.template_img.shape[::-1]
-                resized_template = cv2.resize(self.template_img, (int(w * scale), int(h * scale)))
-                if resized_template.shape[0] > screenshot_gray.shape[0] or resized_template.shape[1] > screenshot_gray.shape[1]:
-                    continue
-                res = cv2.matchTemplate(screenshot_gray, resized_template, cv2.TM_CCOEFF_NORMED)
-                _, score, _, location = cv2.minMaxLoc(res)
-            
-            if score > max_corr:
-                max_corr = score
-                found_location = (location[0] + self.search_region[0], location[1] + self.search_region[1])
+            w, h = self.template_img.shape[::-1]
+            resized_template = cv2.resize(self.template_img, (int(w * scale), int(h * scale)))
+            if resized_template.shape[0] > screenshot_gray.shape[0] or resized_template.shape[1] > screenshot_gray.shape[1]:
+                continue
+            res = cv2.matchTemplate(screenshot_gray, resized_template, cv2.TM_CCOEFF_NORMED)
+            _, max_val, _, max_loc = cv2.minMaxLoc(res)
+            if max_val > max_corr:
+                max_corr = max_val
+                top_left = max_loc
+                found_location = (top_left[0] + self.search_region[0], top_left[1] + self.search_region[1])
                 best_scale = scale
 
         if max_corr >= self.confidence:
             return found_location, best_scale
         else:
             return None, None
+
+    def find_image_with_scaling(self, cfg=None, use_enhanced=None, fallback_to_original=True):
+        """
+        主要的圖標檢測方法：優先使用增強版檢測，失敗時可回退到傳統方法
+        """
+        if cfg is None:
+            cfg = DEFAULT_CFG
+            
+        if use_enhanced is None:
+            use_enhanced = cfg.get("ICON_ENHANCED_DETECTION", True)
+            
+        if use_enhanced:
+            try:
+                result = self.find_icon_enhanced(cfg)
+                if result[0] is not None:
+                    return result[0], result[1]  # 返回 (location, scale) 格式
+                else:
+                    print("[增強圖標檢測] 未找到結果")
+            except Exception as e:
+                print(f"[增強圖標檢測] 異常: {e}")
+        
+        # 增強檢測失敗，回退到傳統方法
+        if fallback_to_original:
+            print("[增強圖標檢測] 回退到傳統模板匹配")
+            return self.find_image_with_scaling_original()
+        
+        return None, None
 
     def get_center_position(self, location, scale):
         if location and scale:
@@ -1621,7 +1648,184 @@ class ArrowDetector:
             raise ValueError(f"無法載入圖片: {character_template_path}")
         self.template_width, self.template_height = self.template_img.shape[::-1]
 
-    def find_character(self):
+    def find_ring_then_match(self, search_region=None, 
+                           circle_r_min=18, circle_r_max=40,  # 依解析度調整
+                           dp=1.2, minDist=25, param1=120, param2=18,
+                           white_v_thresh=200, white_s_max=60,
+                           ring_consistency=0.55,               # 圓周取樣有多少比例是「白」
+                           refine_window=120,                    # 小窗大小（正方形）
+                           confidence=0.82):
+        """
+        先用 HoughCircles 找白色圓環中心；可選擇在中心附近做模板比對做二次驗證。
+        回傳：(center_xy, radius, score)；找不到回傳 (None, None, None)
+        """
+        if search_region is None:
+            search_region = self.search_region
+            
+        rx, ry, rw, rh = map(int, search_region)
+
+        try:
+            shot = pyautogui.screenshot(region=(rx, ry, rw, rh))
+        except Exception as e:
+            print(f"[ring] 截圖失敗: {e}")
+            return None, None, None
+
+        img = np.array(shot)
+        if img.size == 0:
+            return None, None, None
+
+        # ---- 預處理：強化白圈並壓背景 ----
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        H, S, V = cv2.split(hsv)
+
+        # 以「亮且不太飽和」挑白
+        white = cv2.inRange(hsv, (0, 0, white_v_thresh), (179, white_s_max, 255))
+
+        # 平滑 + 邊緣
+        blur = cv2.GaussianBlur(white, (5,5), 0)
+        edges = cv2.Canny(blur, 50, 150)
+
+        # ---- Hough 圓偵測 ----
+        circles = cv2.HoughCircles(edges, cv2.HOUGH_GRADIENT, dp=dp, minDist=minDist,
+                                   param1=param1, param2=param2,
+                                   minRadius=circle_r_min, maxRadius=circle_r_max)
+
+        if circles is None:
+            return None, None, None
+
+        circles = np.round(circles[0, :]).astype(int)
+
+        # ---- 針對每個候選做「白圈一致性」檢查，挑最佳 ----
+        best = (None, None, -1.0)  # (center_xy_global, r, score)
+
+        h, w = white.shape[:2]
+        for (cx, cy, r) in circles:
+            if not (0 <= cx < w and 0 <= cy < h):
+                continue
+
+            # 在圓周上取樣 N 個點，計算白色比例
+            N = max(36, int(2 * math.pi * r / 8))  # 半徑越大取樣越多
+            thetas = np.linspace(0, 2*np.pi, N, endpoint=False)
+            xs = (cx + r * np.cos(thetas)).astype(int)
+            ys = (cy + r * np.sin(thetas)).astype(int)
+            xs = np.clip(xs, 0, w-1)
+            ys = np.clip(ys, 0, h-1)
+
+            ring_white_ratio = (white[ys, xs] > 0).mean()
+
+            # 也檢查「中心附近不是白」（避免把亮點誤當實心圓）
+            inner_r = max(2, int(r*0.45))
+            mask_inner = np.zeros_like(white)
+            cv2.circle(mask_inner, (cx, cy), inner_r, 255, -1)
+            inner_white_ratio = (white[mask_inner > 0] > 0).mean()
+
+            # 綜合分數：白圈比例高且中心白比例低
+            score = ring_white_ratio - 0.4*inner_white_ratio
+
+            if ring_white_ratio >= ring_consistency and score > best[2]:
+                best = ((cx + rx, cy + ry), r, score)
+
+        if best[0] is None:
+            return None, None, None
+
+        center_xy_global, r_best, score = best
+
+        # ---- 可選：在白圈中心附近開小窗做模板二次驗證 ----
+        if self.template_img is not None:
+            cxg, cyg = center_xy_global
+            half = refine_window // 2
+
+            wx = max(rx, cxg - half)
+            wy = max(ry, cyg - half)
+            wx2 = min(rx + rw, cxg + half)
+            wy2 = min(ry + rh, cyg + half)
+
+            wW, wH = wx2 - wx, wy2 - wy
+            if wW < 10 or wH < 10:
+                # 小窗不合理就直接回傳白圈
+                return center_xy_global, r_best, score
+
+            # 取小窗並做模板比對
+            try:
+                win = np.array(pyautogui.screenshot(region=(wx, wy, wW, wH)))
+                win_gray = cv2.cvtColor(win, cv2.COLOR_RGB2GRAY)
+
+                tmpl = self.template_img.copy()
+                if len(tmpl.shape) == 3:
+                    tmpl = cv2.cvtColor(tmpl, cv2.COLOR_BGR2GRAY)
+
+                # 尺度：模板若比小窗大就縮
+                th, tw = tmpl.shape[:2]
+                scale = min(wW / max(1, tw), wH / max(1, th), 1.0)
+                if scale < 1.0:
+                    tmpl = cv2.resize(tmpl, (int(tw*scale), int(th*scale)), interpolation=cv2.INTER_AREA)
+
+                if tmpl.shape[0] <= win_gray.shape[0] and tmpl.shape[1] <= win_gray.shape[1]:
+                    res = cv2.matchTemplate(win_gray, tmpl, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, max_loc = cv2.minMaxLoc(res)
+
+                    if max_val < confidence:
+                        # 模板驗證沒過，仍可回傳「白圈中心」（通常已足夠做移動）
+                        return center_xy_global, r_best, score
+                    else:
+                        # 模板驗證通過，回傳更高的分數
+                        return center_xy_global, r_best, max_val
+            except Exception as e:
+                print(f"[警告] 模板二次驗證失敗: {e}")
+                # 驗證失敗，回傳白圈結果
+                return center_xy_global, r_best, score
+
+        # 單純找白圈就夠用
+        return center_xy_global, r_best, score
+
+    def find_character_enhanced(self, cfg=None, use_ring_detection=True, fallback_to_template=True):
+        """
+        增強版人物檢測：優先使用圓環檢測，失敗時可回退到傳統模板匹配
+        回傳：(location, scale) 或 (None, None)
+        """
+        if cfg is None:
+            # 使用默認配置
+            cfg = DEFAULT_CFG
+            
+        # 檢查是否啟用圓環檢測
+        if use_ring_detection and cfg.get("RING_DETECTION_ENABLED", True):
+            try:
+                center_xy, radius, score = self.find_ring_then_match(
+                    circle_r_min=cfg.get("RING_CIRCLE_R_MIN", 18),
+                    circle_r_max=cfg.get("RING_CIRCLE_R_MAX", 40),
+                    white_v_thresh=cfg.get("RING_WHITE_V_THRESH", 200),
+                    white_s_max=cfg.get("RING_WHITE_S_MAX", 60),
+                    ring_consistency=cfg.get("RING_CONSISTENCY", 0.55),
+                    refine_window=cfg.get("RING_REFINE_WINDOW", 120),
+                    confidence=cfg.get("RING_TEMPLATE_CONFIDENCE", 0.82)
+                )
+                if center_xy is not None:
+                    # 將圓環中心轉換為兼容的 location, scale 格式
+                    # 假設圓環中心就是角色的中心，計算對應的左上角位置
+                    cx, cy = center_xy
+                    # 使用平均尺度作為檢測到的尺度
+                    estimated_scale = 1.0
+                    
+                    # 計算左上角位置（假設模板中心對應圓環中心）
+                    half_w = (self.template_width * estimated_scale) / 2
+                    half_h = (self.template_height * estimated_scale) / 2
+                    location = (int(cx - half_w), int(cy - half_h))
+                    
+                    print(f"[增強檢測] 圓環檢測成功：中心({cx}, {cy})，分數={score:.3f}")
+                    return location, estimated_scale
+                else:
+                    print("[增強檢測] 圓環檢測未找到結果")
+            except Exception as e:
+                print(f"[增強檢測] 圓環檢測異常: {e}")
+        
+        # 圓環檢測失敗，回退到傳統模板匹配
+        if fallback_to_template:
+            print("[增強檢測] 回退到傳統模板匹配")
+            return self.find_character_original()
+        
+        return None, None
+
+    def find_character_original(self):
         try:
             rx, ry, rw, rh = map(int, self.search_region)
             
@@ -1685,6 +1889,12 @@ class ArrowDetector:
         except Exception as e:
             print(f"[錯誤] 人物偵測整體異常: {e}")
             return None, None
+
+    def find_character(self, cfg=None):
+        """
+        主要的人物檢測方法，使用增強版檢測（圓環+模板雙重驗證）
+        """
+        return self.find_character_enhanced(cfg)
 
     def _circular_stats(self, angles_deg):
         """回傳 (均值角度deg, R, circular_std_deg)；angles_deg 為 list[float]"""
@@ -2075,7 +2285,7 @@ class ArrowDetector:
                 if current_time - last_check_time >= check_interval and elapsed >= min_drag_time:
                     # 重新偵測箭頭方向
                     try:
-                        updated_center_loc, updated_scale = self.find_character()
+                        updated_center_loc, updated_scale = self.find_character(cfg)
                         if updated_center_loc and updated_scale:
                             updated_cx = updated_center_loc[0] + (self.template_width * updated_scale) / 2
                             updated_cy = updated_center_loc[1] + (self.template_height * updated_scale) / 2
@@ -2265,7 +2475,7 @@ class ArrowDetector:
         while time.time() - t0 < SESSION_MAX:
             # 重新找人物中心（避免被移動後偏差）
             try:
-                center_loc, center_scale = self.find_character()
+                center_loc, center_scale = self.find_character(cfg)
                 if center_loc and center_scale:
                     cx = center_loc[0] + (self.template_width * center_scale) / 2
                     cy = center_loc[1] + (self.template_height * center_scale) / 2
@@ -2388,20 +2598,8 @@ class DetectorWorker(QThread):
                 search_region=self.cfg["ICON_SEARCH_REGION"],
                 confidence=self.cfg["ICON_CONFIDENCE"],
                 scale_steps=self.cfg["ICON_SCALE_STEPS"],
-                scale_range=tuple(self.cfg["ICON_SCALE_RANGE"]),
-                use_edge_detection=self.cfg.get("USE_EDGE_DETECTION", True)
+                scale_range=tuple(self.cfg["ICON_SCALE_RANGE"])
             )
-            
-            # 如果啟用邊緣檢測，設置相應參數
-            if self.cfg.get("USE_EDGE_DETECTION", True):
-                # 覆蓋預設的邊緣檢測參數
-                icon.template_edge = icon._preprocess_edge(
-                    icon.template_img,
-                    gaussian_kernel=self.cfg.get("EDGE_GAUSSIAN_KERNEL", 3),
-                    canny_low=self.cfg.get("EDGE_CANNY_LOW", 50),
-                    canny_high=self.cfg.get("EDGE_CANNY_HIGH", 150)
-                )
-            
             arrow = ArrowDetector(
                 character_template_path=config_file_path(self.cfg["CHARACTER_IMAGE_PATH"]),
                 search_region=self.cfg["CHARACTER_SEARCH_REGION"],
@@ -2434,13 +2632,13 @@ class DetectorWorker(QThread):
                 continue
 
             # 尋找目標圖標
-            location, scale = icon.find_image_with_scaling()
+            location, scale = icon.find_image_with_scaling(self.cfg)
             if location and scale:
                 # 更新 Discord 通知器的檢測時間
                 self.discord_notifier.update_detection_time()
                 
                 if last_status != "found":
-                    self._log(f"[{time.strftime('%H:%M:%S')}] 找到目標圖標：{location}")
+                    self._log(f"找到目標圖標：{location}")
                     last_status = "found"
                     icon_lost_logged = False  # 重置標記
 
@@ -2448,13 +2646,16 @@ class DetectorWorker(QThread):
                 attempts = 0
                 while attempts < self.cfg["MAX_ARROW_ATTEMPTS"] and self._pause_ev.is_set() and not self._stop_ev.is_set():
                     # 圖標是否還在
-                    current_location, current_scale = icon.find_image_with_scaling()
+                    current_location, current_scale = icon.find_image_with_scaling(self.cfg)
                     if not current_location:
                         if not icon_lost_logged:
                             self._log("目標圖標消失，回到搜尋。")
                             icon_lost_logged = True
                         last_status = None
                         break
+                    else:
+                        # 圖標仍然存在，更新檢測時間
+                        self.discord_notifier.update_detection_time()
 
                     # 只在第一次嘗試時記錄，避免頻繁輸出
                     if attempts == 0:
@@ -2463,7 +2664,7 @@ class DetectorWorker(QThread):
                     time.sleep(self.cfg["PREVENTIVE_CLICK_DELAY"])
 
                     # 找人物
-                    char_loc, char_scale = arrow.find_character()
+                    char_loc, char_scale = arrow.find_character(self.cfg)
                     if char_loc and char_scale:
                         cx = char_loc[0] + (arrow.template_width * char_scale) / 2
                         cy = char_loc[1] + (arrow.template_height * char_scale) / 2
@@ -2483,7 +2684,7 @@ class DetectorWorker(QThread):
                     time.sleep(self.cfg["ARROW_SEARCH_INTERVAL"])
             else:
                 if last_status != "searching":
-                    self._log(f"[{time.strftime('%H:%M:%S')}] 搜尋目標圖標中…")
+                    self._log("搜尋目標圖標中…")
                     
                     # 在開始搜尋之前先嘗試聚焦目標視窗
                     if (self.cfg.get("ENABLE_WINDOW_FOCUS", False) and 
@@ -2520,7 +2721,7 @@ class DetectorWorker(QThread):
         try:
             # 圖標是否還在
             try:
-                current_location, current_scale = icon.find_image_with_scaling()
+                current_location, current_scale = icon.find_image_with_scaling(self.cfg)
             except Exception as e:
                 print(f"[警告] 圖標偵測異常: {e}")
                 return False
@@ -2528,6 +2729,9 @@ class DetectorWorker(QThread):
             if not current_location:
                 # 避免與主循環重複記錄
                 return False
+            else:
+                # 圖標仍然存在，更新檢測時間
+                self.discord_notifier.update_detection_time()
 
             # 預防性點一下（喚醒/聚焦）
             try:
@@ -2539,7 +2743,7 @@ class DetectorWorker(QThread):
 
             # 找人物中心
             try:
-                char_loc, char_scale = arrow.find_character()
+                char_loc, char_scale = arrow.find_character(self.cfg)
             except Exception as e:
                 print(f"[警告] 箭頭會話中人物偵測異常: {e}")
                 return False
@@ -2818,7 +3022,7 @@ class RegionPicker(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Librer - [V.1.2.0, 2025/09/02]")
+        self.setWindowTitle("Librer - [V.1.2.1, 2025/09/02]")
         
         # 設置窗口圖標
         zeny_ico_path = resource_path("zeny.ico")
