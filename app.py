@@ -3022,7 +3022,7 @@ class RegionPicker(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Librer - [V.1.2.0, 2025/09/02]")
+        self.setWindowTitle("Librer - [V.1.2.1, 2025/09/02]")
         
         # 設置窗口圖標
         zeny_ico_path = resource_path("zeny.ico")
