@@ -8,3 +8,4 @@ pytweening>=1.0.3
 pymsgbox>=1.0.9
 pyrect>=0.2.0
 pyperclip>=1.8.0
+requests>=2.25.0
