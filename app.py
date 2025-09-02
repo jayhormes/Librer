@@ -230,7 +230,7 @@ class DiscordNotifier:
                     }
                 ],
                 "footer": {
-                    "text": "Librer 圖標檢測器"
+                    "text": "Librer"
                 }
             }
             
@@ -276,7 +276,7 @@ class DiscordNotifier:
                     }
                 ],
                 "footer": {
-                    "text": "Librer 圖標檢測器 - 測試模式"
+                    "text": "Librer - 測試模式"
                 }
             }
             
@@ -2412,7 +2412,7 @@ class RegionPicker(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Librer - [V.1.1.0, 2025/08/26]")
+        self.setWindowTitle("Librer - [V.1.2.0, 2025/09/02]")
         
         # 設置窗口圖標
         zeny_ico_path = resource_path("zeny.ico")
