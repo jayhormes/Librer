@@ -1,10 +1,18 @@
 # app.py
-import sys, os, json, time, math, random, threading, requests
+import sys, os, json, time, math, random, threading, requests, gc
 import numpy as np
 import cv2
 import pyautogui
 import pygetwindow as gw
 from datetime import datetime
+
+# 穩定性監控
+try:
+    import psutil
+    PSUTIL_AVAILABLE = True
+except ImportError:
+    PSUTIL_AVAILABLE = False
+    print("[警告] psutil 未安裝，無法進行記憶體監控")
 
 from PySide6.QtCore import Qt, QRect, QPoint, Signal, QObject, QThread
 from PySide6.QtWidgets import (
@@ -156,7 +164,28 @@ DEFAULT_CFG = {
     # 日誌管理
     "LOG_MAX_LINES": 500,           # 最大日誌行數，超過會自動清理
     "LOG_CLEANUP_LINES": 100,       # 清理時保留的行數
-    "LOG_AUTO_CLEANUP": True        # 是否啟用自動日誌清理
+    "LOG_AUTO_CLEANUP": True,       # 是否啟用自動日誌清理
+    
+    # 穩定性設定
+    "MEMORY_CHECK_INTERVAL": 300,   # 記憶體檢查間隔（秒）
+    "MEMORY_WARNING_THRESHOLD": 500, # 記憶體警告閾值（MB）
+    "GC_FORCE_INTERVAL": 300,       # 強制垃圾回收間隔（秒）
+    "LOOP_STATUS_INTERVAL": 1000,   # 循環狀態報告間隔
+    "WORKER_STOP_TIMEOUT": 5000,    # Worker停止超時（毫秒）
+    "EXCEPTION_RETRY_COUNT": 3,     # 異常重試次數
+    "EXCEPTION_RETRY_DELAY": 0.5,   # 異常重試延遲（秒）
+    
+    # 日誌安全設定
+    "LOG_SAFE_MODE": True,          # 啟用安全日誌模式
+    "LOG_MAX_MSG_LENGTH": 500,      # 單條日誌最大長度
+    "LOG_CLEANUP_FREQUENCY": 10,    # 每N條日誌檢查一次清理需求
+    "LOG_USE_FALLBACK": True,       # 啟用備用清理方案
+    "LOG_DISABLE_ON_ERROR": True,   # 錯誤時禁用日誌功能
+    
+    # 日誌UI設定
+    "LOG_AUTO_SCROLL": True,        # 預設啟用自動置底
+    "LOG_SHOW_CONTROLS": True,      # 顯示日誌控制按鈕
+    "LOG_SCROLL_SENSITIVITY": 10,   # 滾動敏感度（像素）
 }
 
 CFG_PATH = config_file_path("config.json")
@@ -1524,28 +1553,50 @@ class ImageDetector:
             return None, None, None
 
     def find_image_with_scaling_original(self):
+        """改進的原始模板匹配方法，增加異常處理"""
         scale_steps = self.scale_steps
         scale_range = self.scale_range
-        screenshot = pyautogui.screenshot(region=self.search_region)
-        screenshot_np = np.array(screenshot)
-        screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+        
+        try:
+            screenshot = pyautogui.screenshot(region=self.search_region)
+            if screenshot is None:
+                print("[警告] 截圖返回空值")
+                return None, None
+                
+            screenshot_np = np.array(screenshot)
+            if screenshot_np.size == 0:
+                print("[警告] 截圖圖像為空")
+                return None, None
+                
+            screenshot_gray = cv2.cvtColor(screenshot_np, cv2.COLOR_RGB2GRAY)
+        except Exception as e:
+            print(f"[警告] 圖標偵測截圖處理失敗: {e}")
+            return None, None
 
         found_location = None
         max_corr = -1
         best_scale = None
 
-        for scale in np.linspace(scale_range[0], scale_range[1], scale_steps):
-            w, h = self.template_img.shape[::-1]
-            resized_template = cv2.resize(self.template_img, (int(w * scale), int(h * scale)))
-            if resized_template.shape[0] > screenshot_gray.shape[0] or resized_template.shape[1] > screenshot_gray.shape[1]:
-                continue
-            res = cv2.matchTemplate(screenshot_gray, resized_template, cv2.TM_CCOEFF_NORMED)
-            _, max_val, _, max_loc = cv2.minMaxLoc(res)
-            if max_val > max_corr:
-                max_corr = max_val
-                top_left = max_loc
-                found_location = (top_left[0] + self.search_region[0], top_left[1] + self.search_region[1])
-                best_scale = scale
+        try:
+            for scale in np.linspace(scale_range[0], scale_range[1], scale_steps):
+                w, h = self.template_img.shape[::-1]
+                try:
+                    resized_template = cv2.resize(self.template_img, (int(w * scale), int(h * scale)))
+                    if resized_template.shape[0] > screenshot_gray.shape[0] or resized_template.shape[1] > screenshot_gray.shape[1]:
+                        continue
+                    res = cv2.matchTemplate(screenshot_gray, resized_template, cv2.TM_CCOEFF_NORMED)
+                    _, max_val, _, max_loc = cv2.minMaxLoc(res)
+                    if max_val > max_corr:
+                        max_corr = max_val
+                        top_left = max_loc
+                        found_location = (top_left[0] + self.search_region[0], top_left[1] + self.search_region[1])
+                        best_scale = scale
+                except Exception as e:
+                    print(f"[警告] 尺度 {scale:.2f} 處理失敗: {e}")
+                    continue
+        except Exception as e:
+            print(f"[錯誤] 圖標偵測尺度循環失敗: {e}")
+            return None, None
 
         if max_corr >= self.confidence:
             return found_location, best_scale
@@ -1587,9 +1638,13 @@ class ImageDetector:
         return None, None
 
     def click_center(self, location, scale, cfg=None):
-        """點擊目標中心位置，支持可配置的隨機偏移和多次點擊"""
-        cx, cy = self.get_center_position(location, scale)
-        if cx and cy:
+        """點擊目標中心位置，支持可配置的隨機偏移和多次點擊，增加異常處理"""
+        try:
+            cx, cy = self.get_center_position(location, scale)
+            if not (cx and cy):
+                print("[警告] 無法獲取中心位置")
+                return False
+                
             # 使用傳入的配置或預設值
             if cfg is None:
                 cfg = {
@@ -1606,22 +1661,30 @@ class ImageDetector:
             sw, sh = pyautogui.size()
             
             for i in range(click_count):
-                # 每次點擊都重新計算隨機偏移
-                offx = random.randint(-cfg["CLICK_RANDOM_OFFSET_X"], cfg["CLICK_RANDOM_OFFSET_X"])
-                offy = random.randint(-cfg["CLICK_RANDOM_OFFSET_Y"], cfg["CLICK_RANDOM_OFFSET_Y"])
-                
-                click_x = max(0, min(sw - 1, cx + offx))
-                click_y = max(0, min(sh - 1, cy + offy))
-                
-                pyautogui.click(click_x, click_y)
-                
-                # 如果不是最後一次點擊，則等待隨機間隔
-                if i < click_count - 1:
-                    interval = random.uniform(cfg["CLICK_INTERVAL_MIN"], cfg["CLICK_INTERVAL_MAX"])
-                    time.sleep(interval)
+                try:
+                    # 每次點擊都重新計算隨機偏移
+                    offx = random.randint(-cfg["CLICK_RANDOM_OFFSET_X"], cfg["CLICK_RANDOM_OFFSET_X"])
+                    offy = random.randint(-cfg["CLICK_RANDOM_OFFSET_Y"], cfg["CLICK_RANDOM_OFFSET_Y"])
+                    
+                    click_x = max(0, min(sw - 1, cx + offx))
+                    click_y = max(0, min(sh - 1, cy + offy))
+                    
+                    pyautogui.click(click_x, click_y)
+                    
+                    # 如果不是最後一次點擊，則等待隨機間隔
+                    if i < click_count - 1:
+                        interval = random.uniform(cfg["CLICK_INTERVAL_MIN"], cfg["CLICK_INTERVAL_MAX"])
+                        time.sleep(interval)
+                        
+                except Exception as e:
+                    print(f"[警告] 點擊操作 {i+1}/{click_count} 失敗: {e}")
+                    continue
             
             return True
-        return False
+            
+        except Exception as e:
+            print(f"[錯誤] 點擊中心位置失敗: {e}")
+            return False
 
 
 class ArrowDetector:
@@ -2589,9 +2652,28 @@ class DetectorWorker(QThread):
         self._pause_ev.set()
 
     def _log(self, msg):
-        self.signals.log.emit(msg)
+        """改進的線程安全日誌方法"""
+        try:
+            # 限制日誌訊息長度，避免極長訊息
+            if len(str(msg)) > 500:
+                msg = str(msg)[:497] + "..."
+            
+            self.signals.log.emit(str(msg))
+        except Exception as e:
+            # 如果日誌發送失敗，至少在 console 中輸出
+            print(f"[LOG ERROR] {e}: {str(msg)[:200]}")
+            # 嘗試發送簡化版本
+            try:
+                self.signals.log.emit(f"[日誌錯誤] 原訊息過長或格式錯誤")
+            except:
+                pass  # 如果連簡化版本都無法發送，就放棄
 
     def run(self):
+        # 穩定性改進：添加循環計數器和記憶體監控
+        loop_count = 0
+        last_gc_time = time.time()
+        gc_interval = 300  # 5分鐘強制GC一次
+        
         try:
             icon = ImageDetector(
                 template_path=config_file_path(self.cfg["TARGET_IMAGE_PATH"]),
@@ -2631,8 +2713,48 @@ class DetectorWorker(QThread):
                 time.sleep(0.1)
                 continue
 
-            # 尋找目標圖標
-            location, scale = icon.find_image_with_scaling(self.cfg)
+            # 穩定性改進：定期垃圾回收和狀態檢查
+            loop_count += 1
+            current_time = time.time()
+            
+            # 每300秒（5分鐘）強制垃圾回收和記憶體檢查
+            if current_time - last_gc_time > gc_interval:
+                try:
+                    # 記憶體監控
+                    if PSUTIL_AVAILABLE:
+                        process = psutil.Process()
+                        memory_mb = process.memory_info().rss / 1024 / 1024
+                        if memory_mb > 500:  # 超過500MB警告
+                            self._log(f"[記憶體警告] 當前使用量: {memory_mb:.1f}MB")
+                    
+                    # 強制垃圾回收
+                    gc.collect()
+                    last_gc_time = current_time
+                    if loop_count % 100 == 0:  # 減少日誌頻率
+                        self._log(f"[穩定性] 已執行 {loop_count} 次循環，執行垃圾回收")
+                except Exception as e:
+                    print(f"[警告] 穩定性檢查失敗: {e}")
+            
+            # 每1000次循環記錄狀態
+            if loop_count % 1000 == 0:
+                if PSUTIL_AVAILABLE:
+                    try:
+                        process = psutil.Process()
+                        memory_mb = process.memory_info().rss / 1024 / 1024
+                        self._log(f"[穩定性] 運行狀態良好，已執行 {loop_count} 次循環，記憶體: {memory_mb:.1f}MB")
+                    except:
+                        self._log(f"[穩定性] 運行狀態良好，已執行 {loop_count} 次循環")
+                else:
+                    self._log(f"[穩定性] 運行狀態良好，已執行 {loop_count} 次循環")
+
+            # 尋找目標圖標 - 添加異常處理
+            try:
+                location, scale = icon.find_image_with_scaling(self.cfg)
+            except Exception as e:
+                print(f"[警告] 圖標偵測異常: {e}")
+                self._log(f"[警告] 圖標偵測異常，稍後重試: {e}")
+                time.sleep(self.cfg["MAIN_SEARCH_INTERVAL"])
+                continue
             if location and scale:
                 # 更新 Discord 通知器的檢測時間
                 self.discord_notifier.update_detection_time()
@@ -3022,7 +3144,7 @@ class RegionPicker(QWidget):
 class MainWindow(QWidget):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("Librer - [V.1.2.1, 2025/09/02]")
+        self.setWindowTitle("Librer - [V.1.2.2, 2025/09/04]")
         
         # 設置窗口圖標
         zeny_ico_path = resource_path("zeny.ico")
@@ -3238,15 +3360,73 @@ class MainWindow(QWidget):
         self.update_button_status("stopped")
 
         # --- Log ---
+        # 創建日誌區域容器
+        log_container = QVBoxLayout()
+        
+        # 日誌控制按鈕
+        log_controls = QHBoxLayout()
+        
+        # 自動置底切換按鈕
+        self.btn_auto_scroll = QPushButton("🔽 自動置底")
+        self.btn_auto_scroll.setCheckable(True)
+        self.btn_auto_scroll.setChecked(True)  # 預設開啟
+        self.btn_auto_scroll.setToolTip("開啟時自動滾動到最新日誌，關閉時保持當前位置")
+        self.btn_auto_scroll.clicked.connect(self.toggle_auto_scroll)
+        
+        # 置底按鈕
+        self.btn_scroll_bottom = QPushButton("⬇️ 置底")
+        self.btn_scroll_bottom.setToolTip("立即滾動到最新日誌")
+        self.btn_scroll_bottom.clicked.connect(self.scroll_to_bottom)
+        
+        # 置頂按鈕
+        self.btn_scroll_top = QPushButton("⬆️ 置頂")
+        self.btn_scroll_top.setToolTip("滾動到最早的日誌")
+        self.btn_scroll_top.clicked.connect(self.scroll_to_top)
+        
+        # 清空日誌按鈕
+        self.btn_clear_log = QPushButton("🗑️ 清空")
+        self.btn_clear_log.setToolTip("清空所有日誌")
+        self.btn_clear_log.clicked.connect(self.clear_log)
+        
+        log_controls.addWidget(self.btn_auto_scroll)
+        log_controls.addWidget(self.btn_scroll_bottom)
+        log_controls.addWidget(self.btn_scroll_top)
+        log_controls.addWidget(self.btn_clear_log)
+        log_controls.addStretch()  # 推到左邊
+        
+        # 日誌狀態標籤
+        self.log_status = QLabel("自動置底：開啟")
+        self.log_status.setStyleSheet("color: #0066cc; font-size: 11px;")
+        log_controls.addWidget(self.log_status)
+        
+        # 主要日誌區域
         self.log = QTextEdit()
         self.log.setReadOnly(True)
         self.log.setMinimumHeight(180)
+        
+        # 連接滾動條事件，檢測用戶是否在查看歷史
+        self.log_scrollbar = self.log.verticalScrollBar()
+        self.log_scrollbar.valueChanged.connect(self.on_log_scroll)
+        
+        # 設定自動置底狀態（從配置載入）
+        self.auto_scroll_enabled = self.cfg.get("LOG_AUTO_SCROLL", True)
+        self.btn_auto_scroll.setChecked(self.auto_scroll_enabled)
+        self.toggle_auto_scroll()  # 套用初始狀態
+        
+        self.user_is_browsing = False  # 用戶是否在瀏覽歷史
+        self.last_scroll_position = 0
+        
+        log_container.addLayout(log_controls)
+        log_container.addWidget(self.log)
+        
+        # 創建日誌群組
+        grp_log = QGroupBox("日誌")
+        grp_log.setLayout(log_container)
 
         layout.addWidget(grp_win)
         layout.addWidget(grp_region)
         layout.addWidget(grp_ctrl)
-        layout.addWidget(QLabel("Log"))
-        layout.addWidget(self.log)
+        layout.addWidget(grp_log)
 
         # Save on close
         self.setLayout(layout)
@@ -3325,7 +3505,89 @@ class MainWindow(QWidget):
             return int(x), int(y), int(w), int(h)
 
 
+    def toggle_auto_scroll(self):
+        """切換自動置底模式"""
+        self.auto_scroll_enabled = self.btn_auto_scroll.isChecked()
+        
+        if self.auto_scroll_enabled:
+            self.btn_auto_scroll.setText("🔽 自動置底")
+            self.log_status.setText("自動置底：開啟")
+            self.log_status.setStyleSheet("color: #0066cc; font-size: 11px;")
+            # 立即滾動到底部
+            self.scroll_to_bottom()
+        else:
+            self.btn_auto_scroll.setText("⏸️ 手動模式")
+            self.log_status.setText("自動置底：關閉")
+            self.log_status.setStyleSheet("color: #ff6600; font-size: 11px;")
+    
+    def scroll_to_bottom(self):
+        """滾動到日誌底部"""
+        scrollbar = self.log.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
+        self.user_is_browsing = False
+    
+    def scroll_to_top(self):
+        """滾動到日誌頂部"""
+        scrollbar = self.log.verticalScrollBar()
+        scrollbar.setValue(scrollbar.minimum())
+        self.user_is_browsing = True
+        # 暫時停用自動置底
+        if self.auto_scroll_enabled:
+            self.btn_auto_scroll.setChecked(False)
+            self.toggle_auto_scroll()
+    
+    def clear_log(self):
+        """清空日誌"""
+        reply = QMessageBox.question(
+            self, "確認清空", 
+            "確定要清空所有日誌嗎？\n此操作無法復原。",
+            QMessageBox.Yes | QMessageBox.No,
+            QMessageBox.No
+        )
+        
+        if reply == QMessageBox.Yes:
+            self.log.clear()
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            self.log.append(f"[{timestamp}] [系統] 日誌已手動清空")
+            # 重置計數器
+            if hasattr(self, '_log_count'):
+                self._log_count = 0
+    
+    def on_log_scroll(self, value):
+        """處理日誌滾動事件"""
+        scrollbar = self.log.verticalScrollBar()
+        max_value = scrollbar.maximum()
+        
+        # 記錄滾動位置變化
+        scroll_delta = value - self.last_scroll_position
+        self.last_scroll_position = value
+        
+        # 檢測用戶是否在查看歷史記錄
+        if max_value > 0:
+            # 使用配置的滾動敏感度
+            scroll_sensitivity = self.cfg.get("LOG_SCROLL_SENSITIVITY", 10)
+            
+            # 如果不在底部且是用戶主動滾動（不是程式滾動）
+            if value < max_value - scroll_sensitivity:
+                if not self.user_is_browsing:
+                    self.user_is_browsing = True
+                    # 顯示提示
+                    self.log_status.setText("正在瀏覽歷史記錄")
+                    self.log_status.setStyleSheet("color: #666666; font-size: 11px;")
+            else:
+                # 滾動到底部時
+                if self.user_is_browsing:
+                    self.user_is_browsing = False
+                    # 恢復狀態顯示
+                    if self.auto_scroll_enabled:
+                        self.log_status.setText("自動置底：開啟")
+                        self.log_status.setStyleSheet("color: #0066cc; font-size: 11px;")
+                    else:
+                        self.log_status.setText("自動置底：關閉")
+                        self.log_status.setStyleSheet("color: #ff6600; font-size: 11px;")
+    
     def _ui_to_cfg(self):
+        """將 UI 元素的值更新到配置中"""
         self.cfg["TARGET_TITLE_KEYWORD"] = self.le_title.text().strip()
         
         # 安全解析視窗位置和尺寸
@@ -3351,6 +3613,13 @@ class MainWindow(QWidget):
                 self.cfg["CHARACTER_SEARCH_REGION"] = list(map(int, char_text.split(",")))
         except ValueError as e:
             self.append_log(f"[警告] 人物區域格式錯誤: {e}")
+
+    def smart_scroll_to_bottom(self):
+        """智能滾動到底部 - 只在自動模式且用戶未瀏覽時執行"""
+        if self.auto_scroll_enabled and not self.user_is_browsing:
+            self.scroll_to_bottom()
+        # 更新配置
+        self._ui_to_cfg()
 
     # ------- UI handlers -------
     def pick_region(self, lineedit: QLineEdit):
@@ -3514,11 +3783,23 @@ class MainWindow(QWidget):
         self.update_button_status("running")
 
     def on_stop(self):
+        """改進的停止方法，增加超時保護"""
         if self.worker and self.worker.isRunning():
-            self.worker.stop()
-            self.worker.wait(2000)
-            self.append_log("[停止]")
-            self.update_button_status("stopped")
+            try:
+                self.worker.stop()
+                # 增加超時保護，避免無限等待
+                if not self.worker.wait(5000):  # 等待5秒
+                    self.append_log("[警告] Worker停止超時，強制結束")
+                    self.worker.terminate()
+                    if not self.worker.wait(2000):  # 再等待2秒
+                        self.append_log("[錯誤] Worker無法正常結束")
+                self.append_log("[停止]")
+                self.update_button_status("stopped")
+            except Exception as e:
+                self.append_log(f"[錯誤] 停止Worker時發生異常: {e}")
+                # 強制重置狀態
+                self.worker = None
+                self.update_button_status("stopped")
 
     def on_settings(self):
         """打開參數設定對話框"""
@@ -3618,46 +3899,141 @@ class MainWindow(QWidget):
         self.resize(hint.width(), new_height)
 
     def append_log(self, s):
-        # 添加時間戳記
-        timestamp = datetime.now().strftime("%H:%M:%S")
-        formatted_msg = f"[{timestamp}] {s}"
-        
-        # 添加到日誌區域
-        self.log.append(formatted_msg)
-        
-        # 自動日誌清理
-        if self.cfg.get("LOG_AUTO_CLEANUP", True):
-            self._cleanup_log_if_needed()
-    
-    def _cleanup_log_if_needed(self):
-        """檢查並清理日誌，避免累積過多影響效能"""
-        max_lines = self.cfg.get("LOG_MAX_LINES", 500)
-        cleanup_lines = self.cfg.get("LOG_CLEANUP_LINES", 100)
-        
-        # 檢查當前行數
-        current_text = self.log.toPlainText()
-        lines = current_text.split('\n')
-        
-        if len(lines) > max_lines:
-            # 保留最新的行數，清除舊的
-            recent_lines = lines[-cleanup_lines:]
-            new_text = '\n'.join(recent_lines)
+        """改進的日誌添加方法，減少閃退風險"""
+        try:
+            # 檢查是否啟用安全模式
+            if not self.cfg.get("LOG_SAFE_MODE", True):
+                # 如果禁用安全模式，使用原始方法
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                self.log.append(f"[{timestamp}] {s}")
+                return
             
-            # 添加清理標記
+            # 添加時間戳記
             timestamp = datetime.now().strftime("%H:%M:%S")
-            cleanup_msg = f"[{timestamp}] [系統] 日誌已清理，保留最新 {cleanup_lines} 行記錄"
-            new_text = cleanup_msg + '\n' + new_text
+            formatted_msg = f"[{timestamp}] {s}"
             
-            # 更新日誌區域
-            self.log.setPlainText(new_text)
+            # 限制單條日誌長度，避免極長日誌導致問題
+            max_length = self.cfg.get("LOG_MAX_MSG_LENGTH", 500)
+            if len(formatted_msg) > max_length:
+                formatted_msg = formatted_msg[:max_length-3] + "..."
             
-            # 捲動到底部
+            # 添加到日誌區域
+            self.log.append(formatted_msg)
+            
+            # 智能滾動到底部
+            self.smart_scroll_to_bottom()
+            
+            # 改進的清理機制：降低觸發頻率
+            if self.cfg.get("LOG_AUTO_CLEANUP", True):
+                # 使用計數器減少檢查頻率
+                if not hasattr(self, '_log_count'):
+                    self._log_count = 0
+                self._log_count += 1
+                
+                # 根據配置決定檢查頻率
+                cleanup_freq = self.cfg.get("LOG_CLEANUP_FREQUENCY", 10)
+                if self._log_count % cleanup_freq == 0:
+                    self._safe_cleanup_log_if_needed()
+                    
+        except Exception as e:
+            # 日誌處理失敗時的處理策略
+            if self.cfg.get("LOG_DISABLE_ON_ERROR", True):
+                # 禁用自動清理避免重複錯誤
+                self.cfg["LOG_AUTO_CLEANUP"] = False
+                print(f"[系統] 日誌處理發生錯誤，已禁用自動清理: {e}")
+            
+            # 嘗試記錄基本訊息
+            try:
+                # 嘗試簡單的日誌添加
+                simple_msg = f"[{datetime.now().strftime('%H:%M:%S')}] {str(s)[:100]}..."
+                self.log.append(simple_msg)
+                # 嘗試智能滾動
+                try:
+                    self.smart_scroll_to_bottom()
+                except:
+                    pass  # 滾動失敗也不是致命問題
+            except:
+                # 如果還是失敗，只在控制台輸出
+                print(f"[嚴重] 日誌系統無法運作: {e}")
+                print(f"[訊息] {str(s)[:200]}")
+                # 完全禁用日誌功能
+                self.cfg["LOG_AUTO_CLEANUP"] = False
+    
+    def _safe_cleanup_log_if_needed(self):
+        """安全的日誌清理方法，加強異常處理"""
+        try:
+            max_lines = self.cfg.get("LOG_MAX_LINES", 500)
+            cleanup_lines = self.cfg.get("LOG_CLEANUP_LINES", 100)
+            
+            # 使用 QTextDocument 的行數檢查，比字串分割更有效率
+            document = self.log.document()
+            current_line_count = document.blockCount()
+            
+            if current_line_count > max_lines:
+                # 使用更安全的方式清理日誌
+                self._perform_safe_log_cleanup(cleanup_lines)
+                
+        except Exception as e:
+            print(f"[警告] 日誌清理檢查失敗: {e}")
+            # 清理失敗時禁用自動清理，避免重複錯誤
+            self.cfg["LOG_AUTO_CLEANUP"] = False
+    
+    def _perform_safe_log_cleanup(self, keep_lines):
+        """執行安全的日誌清理"""
+        try:
+            # 方法1：使用 QTextCursor 進行增量清理，避免全文操作
             cursor = self.log.textCursor()
-            cursor.movePosition(cursor.End)
-            self.log.setTextCursor(cursor)
+            cursor.movePosition(cursor.Start)
+            
+            # 計算需要刪除的行數
+            document = self.log.document()
+            total_lines = document.blockCount()
+            lines_to_delete = total_lines - keep_lines
+            
+            if lines_to_delete > 0:
+                # 選擇並刪除前面的行
+                for _ in range(lines_to_delete):
+                    cursor.select(cursor.BlockUnderCursor)
+                    cursor.removeSelectedText()
+                    cursor.deleteChar()  # 刪除換行符
+                
+                # 添加清理標記
+                cursor.movePosition(cursor.Start)
+                timestamp = datetime.now().strftime("%H:%M:%S")
+                cleanup_msg = f"[{timestamp}] [系統] 日誌已清理，保留最新 {keep_lines} 行記錄\n"
+                cursor.insertText(cleanup_msg)
+                
+                # 捲動到底部
+                cursor.movePosition(cursor.End)
+                self.log.setTextCursor(cursor)
+                
+                # 使用智能滾動
+                self.smart_scroll_to_bottom()
+                
+        except Exception as e:
+            print(f"[錯誤] 日誌清理執行失敗: {e}")
+            # 如果增量清理失敗，嘗試備用方案
+            self._fallback_log_cleanup(keep_lines)
+    
+    def _fallback_log_cleanup(self, keep_lines):
+        """備用的日誌清理方案"""
+        try:
+            # 備用方案：直接重置日誌區域
+            timestamp = datetime.now().strftime("%H:%M:%S")
+            fallback_msg = f"[{timestamp}] [系統] 日誌已重置（清理失敗時的備用方案）\n"
+            self.log.setPlainText(fallback_msg)
+            print("[系統] 使用備用日誌清理方案")
+            
+        except Exception as e:
+            print(f"[嚴重錯誤] 備用日誌清理也失敗: {e}")
+            # 最後手段：禁用日誌功能
+            self.cfg["LOG_AUTO_CLEANUP"] = False
 
     def closeEvent(self, e):
         try:
+            # 保存日誌UI偏好設定
+            self.cfg["LOG_AUTO_SCROLL"] = self.auto_scroll_enabled
+            
             self._ui_to_cfg(); save_cfg(self.cfg)
             if self.worker and self.worker.isRunning():
                 self.worker.stop()
